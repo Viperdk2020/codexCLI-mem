@@ -2,6 +2,7 @@ mod cli;
 mod event_processor;
 mod event_processor_with_human_output;
 mod event_processor_with_json_output;
+mod memory;
 
 use std::io::IsTerminal;
 use std::io::Read;
@@ -32,6 +33,8 @@ use tracing_subscriber::EnvFilter;
 
 use crate::event_processor::CodexStatus;
 use crate::event_processor::EventProcessor;
+use crate::memory::MemoryLogger;
+use crate::memory::ToolInvocation;
 
 pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()> {
     let Cli {
@@ -265,8 +268,70 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
     let initial_prompt_task_id = conversation.submit(Op::UserInput { items }).await?;
     info!("Sent prompt with event ID: {initial_prompt_task_id}");
 
+    // Initialize per-repo memory logger.
+    let mut mem = MemoryLogger::new(config.cwd.clone());
+
+    // Tracking maps for call metadata used in memory logging.
+    use std::collections::HashMap;
+    let mut exec_calls: HashMap<String, Vec<String>> = HashMap::new();
+    let mut patch_calls: HashMap<String, (std::time::Instant, bool, Vec<String>)> = HashMap::new();
+
     // Run the loop until the task is complete.
     while let Some(event) = rx.recv().await {
+        // First, opportunistically capture details for memory logging.
+        use codex_core::protocol::EventMsg;
+        use codex_core::protocol::ExecCommandBeginEvent;
+        use codex_core::protocol::ExecCommandEndEvent;
+        use codex_core::protocol::McpToolCallEndEvent;
+        use codex_core::protocol::PatchApplyBeginEvent;
+        use codex_core::protocol::PatchApplyEndEvent;
+
+        match &event.msg {
+            EventMsg::ExecCommandBegin(ExecCommandBeginEvent { call_id, command, .. }) => {
+                exec_calls.insert(call_id.clone(), command.clone());
+            }
+            EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+                call_id,
+                aggregated_output,
+                duration,
+                exit_code,
+                ..
+            }) => {
+                if let Some(cmd) = exec_calls.remove(call_id) {
+                    mem.log_exec(&cmd, *exit_code, *duration, aggregated_output);
+                }
+            }
+            EventMsg::McpToolCallEnd(McpToolCallEndEvent {
+                result,
+                invocation,
+                duration,
+                ..
+            }) => {
+                let success = result.is_ok();
+                let result_json = result.as_ref().map(|v| serde_json::to_value(v).unwrap_or(serde_json::Value::Null)).ok();
+                mem.log_tool_call(ToolInvocation {
+                    server: invocation.server.clone(),
+                    tool: invocation.tool.clone(),
+                    arguments: invocation.arguments.clone(),
+                    duration: *duration,
+                    success,
+                    result: result_json,
+                });
+            }
+            EventMsg::PatchApplyBegin(PatchApplyBeginEvent { call_id, auto_approved, changes }) => {
+                let start = std::time::Instant::now();
+                let files = changes.iter().map(|(p, _)| p.to_string_lossy().to_string()).collect::<Vec<_>>();
+                patch_calls.insert(call_id.clone(), (start, *auto_approved, files));
+            }
+            EventMsg::PatchApplyEnd(PatchApplyEndEvent { call_id, success, stdout, stderr }) => {
+                if let Some((start, auto_approved, files)) = patch_calls.remove(call_id) {
+                    mem.log_patch_apply(*success, auto_approved, start.elapsed(), stdout, stderr, &files);
+                }
+            }
+            _ => {}
+        }
+
+        // Continue normal processing and output.
         let shutdown: CodexStatus = event_processor.process_event(event);
         match shutdown {
             CodexStatus::Running => continue,
