@@ -67,6 +67,10 @@ Codex CLI supports [MCP servers](./docs/advanced.md#model-context-protocol-mcp).
 
 Codex CLI supports a rich set of configuration options, with preferences stored in `~/.codex/config.toml`. For full configuration options, see [Configuration](./docs/config.md).
 
+### Per‑repo memory (local)
+
+Codex keeps a lightweight, per‑repository memory of key actions to help you recall decisions and changes in each project. Entries are written locally to `<repo>/.codex/memory/memory.jsonl` after tool use (shell exec, MCP tool calls) and patch application. The file is plain JSONL so you can search, back up, or clear it easily. See [Per‑repo memory](./docs/config.md#per-repo-memory-local) for details.
+
 ---
 
 ### Docs & FAQ
@@ -99,4 +103,3 @@ Codex CLI supports a rich set of configuration options, with preferences stored 
 ## License
 
 This repository is licensed under the [Apache-2.0 License](LICENSE).
-
