@@ -84,9 +84,8 @@ use codex_core::protocol_config_types::ReasoningEffort as ReasoningEffortConfig;
 use codex_file_search::FileMatch;
 use uuid::Uuid;
 
-mod memory;
-use memory::MemoryLogger;
-use memory::ToolInvocation as MemToolInvocation;
+use crate::memory::MemoryLogger;
+use crate::memory::ToolInvocation as MemToolInvocation;
 
 // Track information about an in-flight exec command.
 struct RunningCommand {
@@ -123,6 +122,8 @@ pub(crate) struct ChatWidget {
     queued_user_messages: VecDeque<UserMessage>,
     // Optional per-repo memory logger
     memlog: Option<MemoryLogger>,
+    // One-time durable memory preamble to inject with first user message
+    memory_preamble: Option<String>,
     // Track patch apply begin metadata for logging on end
     patch_calls: HashMap<String, (Instant, bool, Vec<String>)>,
 }
@@ -170,7 +171,12 @@ impl ChatWidget {
         // Ask codex-core to enumerate custom prompts for this session.
         self.submit_op(Op::ListCustomPrompts);
         if let Some(user_message) = self.initial_user_message.take() {
-            self.submit_user_message(user_message);
+            // Prepend memory preamble if available
+            let mut msg = user_message;
+            if let Some(pre) = self.memory_preamble.take() {
+                if msg.text.is_empty() { msg.text = pre; } else { msg.text = format!("{}\n\n{}", pre, msg.text); }
+            }
+            self.submit_user_message(msg);
         }
         self.request_redraw();
     }
@@ -184,6 +190,31 @@ impl ChatWidget {
 
     fn on_agent_message_delta(&mut self, delta: String) {
         self.handle_streaming_delta(delta);
+    }
+
+    // Intercepts submitted "/memory list tag:foo N" formed by composer fast-path.
+    fn maybe_handle_memory_tag_list(&mut self, text: &str) -> bool {
+        if !text.starts_with("/memory list tag:") { return false; }
+        let rest = text.trim_start_matches("/memory list tag:");
+        let mut parts = rest.split_whitespace();
+        let tag = parts.next().unwrap_or("");
+        let n: usize = parts.next().and_then(|s| s.parse().ok()).unwrap_or(10);
+        if let Some(mem) = &self.memlog {
+            let items = mem.list_durable_tagged(n, tag);
+            let message = if items.is_empty() {
+                "No durable items for tag".to_string()
+            } else {
+                items
+                    .into_iter()
+                    .map(|it| format!("[{}] {} {}", &it.id[..8], it.r#type, it.content))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+            self.add_to_history(history_cell::new_info_message(message));
+        } else {
+            self.add_to_history(history_cell::new_info_message("Per-repo memory is disabled".to_string()));
+        }
+        true
     }
 
     fn on_agent_reasoning_delta(&mut self, delta: String) {
@@ -247,6 +278,23 @@ impl ChatWidget {
 
         // If there is a queued user message, send exactly one now to begin the next turn.
         self.maybe_send_next_queued_input();
+
+        // Log a durable summary item capturing the last assistant answer header.
+        if let Some(m) = self.memlog.as_ref() {
+            // Try to synthesize a compact summary from the most recent agent answer in history.
+            // As a simple heuristic, reuse the last_history_was_exec flag to avoid logging during exec tails.
+            // Here we log a placeholder summary that downstream tools/users can refine.
+            let mut summary = String::new();
+            // Use the last accumulated reasoning header as a compact summary if present.
+            if !self.reasoning_buffer.is_empty() {
+                let prev = self.reasoning_buffer.clone();
+                summary = format!("Task summary: {}", prev.chars().take(200).collect::<String>());
+            }
+            if summary.is_empty() {
+                summary = "Task completed. Record key outcomes and next steps.".to_string();
+            }
+            let _ = m.add_summary(&summary);
+        }
     }
 
     fn on_token_count(&mut self, token_usage: TokenUsage) {
@@ -344,7 +392,7 @@ impl ChatWidget {
             PatchEventType::ApplyBegin {
                 auto_approved: event.auto_approved,
             },
-            event.changes,
+            event.changes.clone(),
         ));
         if self.memlog.is_some() {
             let files = event
@@ -525,9 +573,9 @@ impl ChatWidget {
         event: codex_core::protocol::PatchApplyEndEvent,
     ) {
         if event.success {
-            self.add_to_history(history_cell::new_patch_apply_success(event.stdout));
+            self.add_to_history(history_cell::new_patch_apply_success(event.stdout.clone()));
         } else {
-            self.add_to_history(history_cell::new_patch_apply_failure(event.stderr));
+            self.add_to_history(history_cell::new_patch_apply_failure(event.stderr.clone()));
         }
         if let Some(m) = self.memlog.as_ref() {
             if let Some((start, auto_approved, files)) = self.patch_calls.remove(&event.call_id) {
@@ -548,11 +596,17 @@ impl ChatWidget {
 
         let request = ApprovalRequest::Exec {
             id,
-            command: ev.command,
+            command: ev.command.clone(),
             reason: ev.reason,
         };
         self.bottom_pane.push_approval_request(request);
         self.request_redraw();
+
+        // Log decision item capturing that approval was requested for exec.
+        if let Some(m) = self.memlog.as_ref() {
+            let content = format!("Decision: approval requested for exec: {}", ev.command.join(" "));
+            m.log_decision(&content, &[]);
+        }
     }
 
     pub(crate) fn handle_apply_patch_approval_now(
@@ -573,6 +627,12 @@ impl ChatWidget {
         };
         self.bottom_pane.push_approval_request(request);
         self.request_redraw();
+
+        // Log decision item capturing that approval was requested for apply_patch.
+        if let Some(m) = self.memlog.as_ref() {
+            let content = format!("Decision: approval requested for apply_patch ({} changes)", ev.changes.len());
+            m.log_decision(&content, &[]);
+        }
     }
 
     pub(crate) fn handle_exec_begin_now(&mut self, ev: ExecCommandBeginEvent) {
@@ -608,6 +668,8 @@ impl ChatWidget {
         self.add_to_history(history_cell::new_active_mcp_tool_call(ev.invocation));
     }
     pub(crate) fn handle_mcp_end_now(&mut self, ev: McpToolCallEndEvent) {
+        let inv_clone = ev.invocation.clone();
+        let res_clone = ev.result.clone();
         self.flush_answer_stream_with_separator();
         self.add_boxed_history(history_cell::new_completed_mcp_tool_call(
             80,
@@ -620,16 +682,15 @@ impl ChatWidget {
             ev.result,
         ));
         if let Some(m) = self.memlog.as_ref() {
-            let success = ev.is_success();
-            let result_json = ev
-                .result
+            let success = res_clone.as_ref().map(|r| !r.is_error.unwrap_or(false)).unwrap_or(false);
+            let result_json = res_clone
                 .as_ref()
                 .map(|v| serde_json::to_value(v).unwrap_or(serde_json::Value::Null))
                 .ok();
             m.log_tool_call(MemToolInvocation {
-                server: ev.invocation.server.clone(),
-                tool: ev.invocation.tool.clone(),
-                arguments: ev.invocation.arguments.clone(),
+                server: inv_clone.server.clone(),
+                tool: inv_clone.tool.clone(),
+                arguments: inv_clone.arguments.clone(),
                 duration: ev.duration,
                 success,
                 result: result_json,
@@ -669,7 +730,7 @@ impl ChatWidget {
             None
         };
 
-        Self {
+        let mut this = Self {
             app_event_tx: app_event_tx.clone(),
             frame_requester: frame_requester.clone(),
             codex_op_tx,
@@ -701,8 +762,13 @@ impl ChatWidget {
             queued_user_messages: VecDeque::new(),
             show_welcome_banner: true,
             memlog,
+            memory_preamble: None,
             patch_calls: HashMap::new(),
+        };
+        if let Some(m) = &this.memlog {
+            this.memory_preamble = m.build_durable_preamble(1024);
         }
+        this
     }
 
     /// Create a ChatWidget attached to an existing conversation (e.g., a fork).
@@ -739,7 +805,7 @@ impl ChatWidget {
             None
         };
 
-        Self {
+        let mut this = Self {
             app_event_tx: app_event_tx.clone(),
             frame_requester: frame_requester.clone(),
             codex_op_tx,
@@ -768,8 +834,11 @@ impl ChatWidget {
             queued_user_messages: VecDeque::new(),
             show_welcome_banner: false,
             memlog,
+            memory_preamble: None,
             patch_calls: HashMap::new(),
-        }
+        };
+        if let Some(m) = &this.memlog { this.memory_preamble = m.build_durable_preamble(1024); }
+        this
     }
 
     pub fn desired_height(&self, width: u16) -> u16 {
@@ -912,6 +981,9 @@ impl ChatWidget {
             }
             SlashCommand::Mcp => {
                 self.add_mcp_output();
+            }
+            SlashCommand::Memory => {
+                // No-op: handled inline by composer.
             }
             #[cfg(debug_assertions)]
             SlashCommand::TestApproval => {

@@ -73,6 +73,25 @@ Codex keeps a lightweight, per‑repository memory of key actions to help you re
 
 Toggle per run (TUI or exec): add `--memory off` to disable, or `--memory on` to force‑enable. You can also set `CODEX_PER_REPO_MEMORY=0|1`.
 
+Durable memory and smarter preamble
+- Durable items: In addition to action logs (exec, tool, change), Codex records durable items you and Codex can reuse across turns:
+  - `pref`: your preferences and decisions (e.g., “Prefer Ruff + Black”).
+  - `summary`: short outcomes/facts captured on task completion.
+  - `decision`: approval checkpoints and key decisions.
+- Smarter preamble: On new sessions, Codex injects a short “project memory” preamble built from recent `pref` and `summary` items. It deduplicates, merges tags, caps counts, and enforces a length limit so your prompt stays concise.
+
+TUI: memory slash commands
+- Add preference: `/memory add Use Ruff + Black`
+- List recent durable: `/memory list 10`
+- Search durable: `/memory search ruff`
+- List by tag with cap: `/memory list tag:python 10`
+- Delete by id prefix: `/memory del 1a2b3c4d`
+- Help: `/memory help`
+
+What gets logged automatically (TUI)
+- On task complete: a `summary` durable item with a compact preview of the last assistant message (kept brief).
+- On approval request: a `decision` durable item noting the request (exec/patch).
+
 ---
 
 ### Docs & FAQ
