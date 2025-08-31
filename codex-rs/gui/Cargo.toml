@@ -1,7 +1,10 @@
 [package]
 name = "codex-gui"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+
+[lints]
+workspace = true
 
 [dependencies]
 eframe = { version = "0.28", features = ["wgpu"] }
@@ -15,8 +18,8 @@ serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+tracing-log = "0.2"
 uuid = { version = "1", features = ["v4", "serde"] }
 
 codex-core = { package = "codex-core", path = "../core" }
 codex-common = { package = "codex-common", path = "../common" }
-

@@ -948,10 +948,7 @@ pub(crate) fn new_error_event(message: String) -> PlainHistoryCell {
 
 /// Display a lightweight system/info message in the transcript.
 pub(crate) fn new_info_message(message: String) -> PlainHistoryCell {
-    let lines = vec![
-        Line::from(""),
-        Line::from(message),
-    ];
+    let lines = vec![Line::from(""), Line::from(message)];
     PlainHistoryCell { lines }
 }
 

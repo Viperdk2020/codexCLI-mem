@@ -200,7 +200,9 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
         conversation_id: _,
         conversation,
         session_configured,
-    } = conversation_manager.new_conversation(config.clone()).await?;
+    } = conversation_manager
+        .new_conversation(config.clone())
+        .await?;
     info!("Codex initialized with event: {session_configured:?}");
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Event>();
@@ -286,9 +288,7 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
                 _ => None,
             }
         });
-    let mem_enabled = mem_enabled_cli
-        .or(mem_enabled_env)
-        .unwrap_or(true); // default: on
+    let mem_enabled = mem_enabled_cli.or(mem_enabled_env).unwrap_or(true); // default: on
 
     // Initialize per-repo memory logger if enabled.
     let mut memlog = mem_enabled.then(|| MemoryLogger::new(config.cwd.clone()));
@@ -314,7 +314,9 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
                     m.set_session_id(ev.session_id);
                 }
             }
-            EventMsg::ExecCommandBegin(ExecCommandBeginEvent { call_id, command, .. }) => {
+            EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+                call_id, command, ..
+            }) => {
                 exec_calls.insert(call_id.clone(), command.clone());
             }
             EventMsg::ExecCommandEnd(ExecCommandEndEvent {
@@ -337,7 +339,10 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
                 ..
             }) => {
                 let success = result.is_ok();
-                let result_json = result.as_ref().map(|v| serde_json::to_value(v).unwrap_or(serde_json::Value::Null)).ok();
+                let result_json = result
+                    .as_ref()
+                    .map(|v| serde_json::to_value(v).unwrap_or(serde_json::Value::Null))
+                    .ok();
                 if let Some(m) = memlog.as_ref() {
                     m.log_tool_call(ToolInvocation {
                         server: invocation.server.clone(),
@@ -349,15 +354,34 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
                     });
                 }
             }
-            EventMsg::PatchApplyBegin(PatchApplyBeginEvent { call_id, auto_approved, changes }) => {
+            EventMsg::PatchApplyBegin(PatchApplyBeginEvent {
+                call_id,
+                auto_approved,
+                changes,
+            }) => {
                 let start = std::time::Instant::now();
-                let files = changes.iter().map(|(p, _)| p.to_string_lossy().to_string()).collect::<Vec<_>>();
+                let files = changes
+                    .iter()
+                    .map(|(p, _)| p.to_string_lossy().to_string())
+                    .collect::<Vec<_>>();
                 patch_calls.insert(call_id.clone(), (start, *auto_approved, files));
             }
-            EventMsg::PatchApplyEnd(PatchApplyEndEvent { call_id, success, stdout, stderr }) => {
+            EventMsg::PatchApplyEnd(PatchApplyEndEvent {
+                call_id,
+                success,
+                stdout,
+                stderr,
+            }) => {
                 if let Some((start, auto_approved, files)) = patch_calls.remove(call_id) {
                     if let Some(m) = memlog.as_ref() {
-                        m.log_patch_apply(*success, auto_approved, start.elapsed(), stdout, stderr, &files);
+                        m.log_patch_apply(
+                            *success,
+                            auto_approved,
+                            start.elapsed(),
+                            stdout,
+                            stderr,
+                            &files,
+                        );
                     }
                 }
             }

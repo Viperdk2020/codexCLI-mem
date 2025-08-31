@@ -844,7 +844,10 @@ impl ChatComposer {
                 // Inline handle a few lightweight commands without round-trip
                 if text.starts_with("/memory") {
                     let parts: Vec<&str> = text.split_whitespace().collect();
-                    let msg = if parts.len() >= 3 && (parts[1] == "list" || parts[1] == "search") && parts[2].starts_with("tag:") {
+                    let msg = if parts.len() >= 3
+                        && (parts[1] == "list" || parts[1] == "search")
+                        && parts[2].starts_with("tag:")
+                    {
                         let tag = parts[2].trim_start_matches("tag:");
                         let n = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(10);
                         // Delegate rendering to ChatWidget via AppEvent

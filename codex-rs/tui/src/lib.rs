@@ -25,7 +25,6 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::prelude::*;
 
 mod app;
-mod memory;
 mod app_backtrack;
 mod app_event;
 mod app_event_sender;
@@ -46,6 +45,7 @@ pub mod insert_history;
 pub mod live_wrap;
 mod markdown;
 mod markdown_stream;
+mod memory;
 pub mod onboarding;
 mod pager_overlay;
 mod render;

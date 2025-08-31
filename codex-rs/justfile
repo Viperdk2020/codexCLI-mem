@@ -16,6 +16,18 @@ exec *args:
 tui *args:
     cargo run --bin codex -- tui "$@"
 
+# `codex-gui` (egui MVP)
+gui *args:
+    cargo run -p codex-gui -- "$@"
+
+# Launch `codex-gui` with the Glow renderer by default.
+gui-glow *args:
+    cargo run -p codex-gui -- --renderer glow "$@"
+
+# Launch `codex-gui` with the WGPU renderer.
+gui-wgpu *args:
+    cargo run -p codex-gui -- --renderer wgpu "$@"
+
 # Run the CLI version of the file-search crate.
 file-search *args:
     cargo run --bin codex-file-search -- "$@"

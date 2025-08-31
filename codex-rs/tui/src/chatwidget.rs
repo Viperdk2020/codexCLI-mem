@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::time::Instant;
 use std::sync::Arc;
+use std::time::Instant;
 
 use codex_core::config::Config;
 use codex_core::protocol::AgentMessageDeltaEvent;
@@ -174,7 +174,11 @@ impl ChatWidget {
             // Prepend memory preamble if available
             let mut msg = user_message;
             if let Some(pre) = self.memory_preamble.take() {
-                if msg.text.is_empty() { msg.text = pre; } else { msg.text = format!("{}\n\n{}", pre, msg.text); }
+                if msg.text.is_empty() {
+                    msg.text = pre;
+                } else {
+                    msg.text = format!("{}\n\n{}", pre, msg.text);
+                }
             }
             self.submit_user_message(msg);
         }
@@ -194,7 +198,9 @@ impl ChatWidget {
 
     // Intercepts submitted "/memory list tag:foo N" formed by composer fast-path.
     fn maybe_handle_memory_tag_list(&mut self, text: &str) -> bool {
-        if !text.starts_with("/memory list tag:") { return false; }
+        if !text.starts_with("/memory list tag:") {
+            return false;
+        }
         let rest = text.trim_start_matches("/memory list tag:");
         let mut parts = rest.split_whitespace();
         let tag = parts.next().unwrap_or("");
@@ -212,7 +218,9 @@ impl ChatWidget {
             };
             self.add_to_history(history_cell::new_info_message(message));
         } else {
-            self.add_to_history(history_cell::new_info_message("Per-repo memory is disabled".to_string()));
+            self.add_to_history(history_cell::new_info_message(
+                "Per-repo memory is disabled".to_string(),
+            ));
         }
         true
     }
@@ -288,7 +296,10 @@ impl ChatWidget {
             // Use the last accumulated reasoning header as a compact summary if present.
             if !self.reasoning_buffer.is_empty() {
                 let prev = self.reasoning_buffer.clone();
-                summary = format!("Task summary: {}", prev.chars().take(200).collect::<String>());
+                summary = format!(
+                    "Task summary: {}",
+                    prev.chars().take(200).collect::<String>()
+                );
             }
             if summary.is_empty() {
                 summary = "Task completed. Record key outcomes and next steps.".to_string();
@@ -400,8 +411,10 @@ impl ChatWidget {
                 .iter()
                 .map(|(p, _)| p.to_string_lossy().to_string())
                 .collect::<Vec<_>>();
-            self.patch_calls
-                .insert(event.call_id.clone(), (Instant::now(), event.auto_approved, files));
+            self.patch_calls.insert(
+                event.call_id.clone(),
+                (Instant::now(), event.auto_approved, files),
+            );
         }
     }
 
@@ -557,12 +570,7 @@ impl ChatWidget {
                 self.add_to_history(cell);
                 self.last_history_was_exec = true;
                 if let Some(m) = self.memlog.as_ref() {
-                    m.log_exec(
-                        &command,
-                        ev.exit_code,
-                        ev.duration,
-                        &ev.aggregated_output,
-                    );
+                    m.log_exec(&command, ev.exit_code, ev.duration, &ev.aggregated_output);
                 }
             }
         }
@@ -604,7 +612,10 @@ impl ChatWidget {
 
         // Log decision item capturing that approval was requested for exec.
         if let Some(m) = self.memlog.as_ref() {
-            let content = format!("Decision: approval requested for exec: {}", ev.command.join(" "));
+            let content = format!(
+                "Decision: approval requested for exec: {}",
+                ev.command.join(" ")
+            );
             m.log_decision(&content, &[]);
         }
     }
@@ -630,7 +641,10 @@ impl ChatWidget {
 
         // Log decision item capturing that approval was requested for apply_patch.
         if let Some(m) = self.memlog.as_ref() {
-            let content = format!("Decision: approval requested for apply_patch ({} changes)", ev.changes.len());
+            let content = format!(
+                "Decision: approval requested for apply_patch ({} changes)",
+                ev.changes.len()
+            );
             m.log_decision(&content, &[]);
         }
     }
@@ -682,7 +696,10 @@ impl ChatWidget {
             ev.result,
         ));
         if let Some(m) = self.memlog.as_ref() {
-            let success = res_clone.as_ref().map(|r| !r.is_error.unwrap_or(false)).unwrap_or(false);
+            let success = res_clone
+                .as_ref()
+                .map(|r| !r.is_error.unwrap_or(false))
+                .unwrap_or(false);
             let result_json = res_clone
                 .as_ref()
                 .map(|v| serde_json::to_value(v).unwrap_or(serde_json::Value::Null))
@@ -837,7 +854,9 @@ impl ChatWidget {
             memory_preamble: None,
             patch_calls: HashMap::new(),
         };
-        if let Some(m) = &this.memlog { this.memory_preamble = m.build_durable_preamble(1024); }
+        if let Some(m) = &this.memlog {
+            this.memory_preamble = m.build_durable_preamble(1024);
+        }
         this
     }
 
