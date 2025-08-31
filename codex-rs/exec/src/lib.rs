@@ -200,7 +200,7 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
         conversation_id: _,
         conversation,
         session_configured,
-    } = conversation_manager.new_conversation(config).await?;
+    } = conversation_manager.new_conversation(config.clone()).await?;
     info!("Codex initialized with event: {session_configured:?}");
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Event>();
