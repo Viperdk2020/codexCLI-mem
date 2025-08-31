@@ -16,7 +16,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
 
 codex-core = { package = "codex-core", path = "../core" }
 codex-common = { package = "codex-common", path = "../common" }
+codex-login = { package = "codex-login", path = "../login" }
 

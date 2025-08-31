@@ -71,6 +71,8 @@ Codex CLI supports a rich set of configuration options, with preferences stored 
 
 Codex keeps a lightweight, per‑repository memory of key actions to help you recall decisions and changes in each project. Entries are written locally to `<repo>/.codex/memory/memory.jsonl` after tool use (shell exec, MCP tool calls) and patch application. The file is plain JSONL so you can search, back up, or clear it easily. See [Per‑repo memory](./docs/config.md#per-repo-memory-local) for details.
 
+The GUI also reads this file to show durable items and inject a short preamble into the first prompt.
+
 Toggle per run (TUI or exec): add `--memory off` to disable, or `--memory on` to force‑enable. You can also set `CODEX_PER_REPO_MEMORY=0|1`.
 
 Durable memory and smarter preamble
@@ -91,6 +93,25 @@ TUI: memory slash commands
 What gets logged automatically (TUI)
 - On task complete: a `summary` durable item with a compact preview of the last assistant message (kept brief).
 - On approval request: a `decision` durable item noting the request (exec/patch).
+
+### GUI (egui MVP)
+
+The Rust GUI prototype lives under `codex-rs/gui` and provides a minimal desktop window for Codex.
+
+Build and run:
+
+```shell
+cargo run -p codex-gui
+```
+
+Features:
+- Live Codex conversation with approvals and token usage
+- Right-side memory panel showing durable items and recent actions
+- Injects durable memory preamble into the first prompt
+
+Screenshots: _coming soon_
+
+Limitations: early preview with plain-text rendering and minimal styling.
 
 ---
 
