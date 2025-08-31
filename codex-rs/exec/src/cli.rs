@@ -3,6 +3,17 @@ use clap::ValueEnum;
 use codex_common::CliConfigOverrides;
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum MemoryToggle {
+    /// Follow the default behavior (currently: enabled).
+    Auto,
+    /// Force-enable per-repo memory logging for this run.
+    On,
+    /// Disable per-repo memory logging for this run.
+    Off,
+}
+
 #[derive(Parser, Debug)]
 #[command(version)]
 pub struct Cli {
@@ -62,6 +73,10 @@ pub struct Cli {
     /// Specifies file where the last message from the agent should be written.
     #[arg(long = "output-last-message")]
     pub last_message_file: Option<PathBuf>,
+
+    /// Control per-repo memory logging for this run (default: auto -> on).
+    #[arg(long = "memory", value_enum, default_value_t = MemoryToggle::Auto)]
+    pub memory: MemoryToggle,
 
     /// Initial instructions for the agent. If not provided as an argument (or
     /// if `-` is used), instructions are read from stdin.
