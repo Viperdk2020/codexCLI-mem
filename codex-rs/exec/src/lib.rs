@@ -52,6 +52,7 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
         sandbox_mode: sandbox_mode_cli_arg,
         prompt,
         config_overrides,
+        memory,
     } = cli;
 
     // Determine the prompt based on CLI arg and/or stdin.
@@ -268,8 +269,29 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
     let initial_prompt_task_id = conversation.submit(Op::UserInput { items }).await?;
     info!("Sent prompt with event ID: {initial_prompt_task_id}");
 
-    // Initialize per-repo memory logger.
-    let mut mem = MemoryLogger::new(config.cwd.clone());
+    // Determine whether to enable per-repo memory logging.
+    let mem_enabled_cli = match memory {
+        crate::cli::MemoryToggle::On => Some(true),
+        crate::cli::MemoryToggle::Off => Some(false),
+        crate::cli::MemoryToggle::Auto => None,
+    };
+    let mem_enabled_env = std::env::var("CODEX_PER_REPO_MEMORY")
+        .or_else(|_| std::env::var("CODEX_MEMORY"))
+        .ok()
+        .and_then(|v| {
+            let v = v.trim().to_ascii_lowercase();
+            match v.as_str() {
+                "1" | "true" | "yes" | "on" => Some(true),
+                "0" | "false" | "no" | "off" => Some(false),
+                _ => None,
+            }
+        });
+    let mem_enabled = mem_enabled_cli
+        .or(mem_enabled_env)
+        .unwrap_or(true); // default: on
+
+    // Initialize per-repo memory logger if enabled.
+    let mut memlog = mem_enabled.then(|| MemoryLogger::new(config.cwd.clone()));
 
     // Tracking maps for call metadata used in memory logging.
     use std::collections::HashMap;
@@ -287,6 +309,11 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
         use codex_core::protocol::PatchApplyEndEvent;
 
         match &event.msg {
+            EventMsg::SessionConfigured(ev) => {
+                if let Some(m) = memlog.as_mut() {
+                    m.set_session_id(ev.session_id);
+                }
+            }
             EventMsg::ExecCommandBegin(ExecCommandBeginEvent { call_id, command, .. }) => {
                 exec_calls.insert(call_id.clone(), command.clone());
             }
@@ -298,7 +325,9 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
                 ..
             }) => {
                 if let Some(cmd) = exec_calls.remove(call_id) {
-                    mem.log_exec(&cmd, *exit_code, *duration, aggregated_output);
+                    if let Some(m) = memlog.as_ref() {
+                        m.log_exec(&cmd, *exit_code, *duration, aggregated_output);
+                    }
                 }
             }
             EventMsg::McpToolCallEnd(McpToolCallEndEvent {
@@ -309,14 +338,16 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
             }) => {
                 let success = result.is_ok();
                 let result_json = result.as_ref().map(|v| serde_json::to_value(v).unwrap_or(serde_json::Value::Null)).ok();
-                mem.log_tool_call(ToolInvocation {
-                    server: invocation.server.clone(),
-                    tool: invocation.tool.clone(),
-                    arguments: invocation.arguments.clone(),
-                    duration: *duration,
-                    success,
-                    result: result_json,
-                });
+                if let Some(m) = memlog.as_ref() {
+                    m.log_tool_call(ToolInvocation {
+                        server: invocation.server.clone(),
+                        tool: invocation.tool.clone(),
+                        arguments: invocation.arguments.clone(),
+                        duration: *duration,
+                        success,
+                        result: result_json,
+                    });
+                }
             }
             EventMsg::PatchApplyBegin(PatchApplyBeginEvent { call_id, auto_approved, changes }) => {
                 let start = std::time::Instant::now();
@@ -325,7 +356,9 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
             }
             EventMsg::PatchApplyEnd(PatchApplyEndEvent { call_id, success, stdout, stderr }) => {
                 if let Some((start, auto_approved, files)) = patch_calls.remove(call_id) {
-                    mem.log_patch_apply(*success, auto_approved, start.elapsed(), stdout, stderr, &files);
+                    if let Some(m) = memlog.as_ref() {
+                        m.log_patch_apply(*success, auto_approved, start.elapsed(), stdout, stderr, &files);
+                    }
                 }
             }
             _ => {}

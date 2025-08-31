@@ -71,6 +71,8 @@ Codex CLI supports a rich set of configuration options, with preferences stored 
 
 Codex keeps a lightweight, per‑repository memory of key actions to help you recall decisions and changes in each project. Entries are written locally to `<repo>/.codex/memory/memory.jsonl` after tool use (shell exec, MCP tool calls) and patch application. The file is plain JSONL so you can search, back up, or clear it easily. See [Per‑repo memory](./docs/config.md#per-repo-memory-local) for details.
 
+Toggle per run (exec): add `--memory off` to disable, or `--memory on` to force‑enable. You can also set `CODEX_PER_REPO_MEMORY=0|1`.
+
 ---
 
 ### Docs & FAQ

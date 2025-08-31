@@ -638,3 +638,10 @@ Notes
 - This store is local-only and intended for project memory/history.
 - Clearing: delete or truncate the file at `<repo>/.codex/memory/memory.jsonl`.
 - Backups/exports: copy the JSONL file anywhere (each line is an entry).
+
+Toggle
+- Per run (exec mode): pass `--memory off` to disable or `--memory on` to force-enable.
+- Environment variable (both modes): set `CODEX_PER_REPO_MEMORY=0|1` (also accepts `on|off`, `true|false`). Alias: `CODEX_MEMORY`.
+  - Examples:
+    - `codex exec --memory off -- "Implement X"`
+    - `CODEX_PER_REPO_MEMORY=0 codex exec -- "Run build"`
