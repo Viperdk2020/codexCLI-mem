@@ -327,7 +327,26 @@ async fn run_ratatui_app(
         }
     }
 
-    let app_result = App::run(&mut tui, auth_manager, config, prompt, images).await;
+    // Determine per-repo memory logging toggle from CLI and env
+    let mem_enabled_cli = match cli.memory {
+        crate::cli::MemoryToggle::On => Some(true),
+        crate::cli::MemoryToggle::Off => Some(false),
+        crate::cli::MemoryToggle::Auto => None,
+    };
+    let mem_enabled_env = std::env::var("CODEX_PER_REPO_MEMORY")
+        .or_else(|_| std::env::var("CODEX_MEMORY"))
+        .ok()
+        .and_then(|v| {
+            let v = v.trim().to_ascii_lowercase();
+            match v.as_str() {
+                "1" | "true" | "yes" | "on" => Some(true),
+                "0" | "false" | "no" | "off" => Some(false),
+                _ => None,
+            }
+        });
+    let mem_enabled = mem_enabled_cli.or(mem_enabled_env).unwrap_or(true);
+
+    let app_result = App::run(&mut tui, auth_manager, config, prompt, images, mem_enabled).await;
 
     restore();
     // Mark the end of the recorded session.

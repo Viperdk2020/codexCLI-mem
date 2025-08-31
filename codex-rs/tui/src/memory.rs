@@ -6,13 +6,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use uuid::Uuid;
 
-/// Minimal per-repo memory logger that writes JSONL entries to
-/// `<repo>/.codex/memory/memory.jsonl`.
 pub(crate) struct MemoryLogger {
     repo_root: PathBuf,
     memory_dir: PathBuf,
     memory_file: PathBuf,
-    index_file: PathBuf,
     session_id: Option<String>,
 }
 
@@ -31,36 +28,31 @@ impl MemoryLogger {
         let repo_root = detect_repo_root(&start_path).unwrap_or(start_path);
         let memory_dir = repo_root.join(".codex").join("memory");
         let memory_file = memory_dir.join("memory.jsonl");
-        let index_file = memory_dir.join("index.json");
-        // Best-effort create, ignore errors here; we'll handle on write.
         let _ = create_dir_all(&memory_dir);
         Self {
             repo_root,
             memory_dir,
             memory_file,
-            index_file,
             session_id: None,
         }
     }
 
+    pub fn set_session_id(&mut self, session_id: Uuid) {
+        self.session_id = Some(session_id.to_string());
+    }
+
     fn write_line(&self, value: &serde_json::Value) {
         if let Err(e) = create_dir_all(&self.memory_dir) {
-            tracing::debug!("memory: create_dir_all failed: {e}");
+            tracing::debug!("tui memory: create_dir_all failed: {e}");
             return;
         }
-        match OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.memory_file)
-        {
+        match OpenOptions::new().create(true).append(true).open(&self.memory_file) {
             Ok(mut f) => {
                 if let Ok(s) = serde_json::to_string(value) {
                     let _ = writeln!(f, "{}", s);
                 }
             }
-            Err(e) => {
-                tracing::debug!("memory: open append failed: {e}");
-            }
+            Err(e) => tracing::debug!("tui memory: open append failed: {e}"),
         }
     }
 
@@ -73,11 +65,11 @@ impl MemoryLogger {
             "ts": ts,
             "repo": self.repo_root.to_string_lossy(),
             "type": "exec",
-            "content": format!("{}", shlex::try_join(command.iter().map(|s| s.as_str())).unwrap_or_else(|_| command.join(" "))),
+            "content": shlex::try_join(command.iter().map(|s| s.as_str())).unwrap_or_else(|_| command.join(" ")),
             "tags": ["exec"],
             "files": [],
             "session_id": self.session_id,
-            "source": "codex-rs",
+            "source": "codex-tui",
             "metadata": {
                 "exit_code": exit_code,
                 "duration_ms": duration.as_millis() as u64,
@@ -109,7 +101,7 @@ impl MemoryLogger {
             "tags": ["tool"],
             "files": [],
             "session_id": self.session_id,
-            "source": "codex-rs",
+            "source": "codex-tui",
             "metadata": {
                 "server": inv.server,
                 "tool": inv.tool,
@@ -142,7 +134,7 @@ impl MemoryLogger {
             "tags": ["apply_patch"],
             "files": files,
             "session_id": self.session_id,
-            "source": "codex-rs",
+            "source": "codex-tui",
             "metadata": {
                 "success": success,
                 "auto_approved": auto_approved,
@@ -151,10 +143,6 @@ impl MemoryLogger {
             }
         });
         self.write_line(&value);
-    }
-
-    pub fn set_session_id(&mut self, session_id: uuid::Uuid) {
-        self.session_id = Some(session_id.to_string());
     }
 }
 
@@ -181,3 +169,4 @@ fn detect_repo_root(start: &Path) -> Option<PathBuf> {
     }
     None
 }
+

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::time::Instant;
 use std::sync::Arc;
 
 use codex_core::config::Config;
@@ -83,6 +84,10 @@ use codex_core::protocol_config_types::ReasoningEffort as ReasoningEffortConfig;
 use codex_file_search::FileMatch;
 use uuid::Uuid;
 
+mod memory;
+use memory::MemoryLogger;
+use memory::ToolInvocation as MemToolInvocation;
+
 // Track information about an in-flight exec command.
 struct RunningCommand {
     command: Vec<String>,
@@ -116,6 +121,10 @@ pub(crate) struct ChatWidget {
     last_history_was_exec: bool,
     // User messages queued while a turn is in progress
     queued_user_messages: VecDeque<UserMessage>,
+    // Optional per-repo memory logger
+    memlog: Option<MemoryLogger>,
+    // Track patch apply begin metadata for logging on end
+    patch_calls: HashMap<String, (Instant, bool, Vec<String>)>,
 }
 
 struct UserMessage {
@@ -150,6 +159,9 @@ impl ChatWidget {
         self.bottom_pane
             .set_history_metadata(event.history_log_id, event.history_entry_count);
         self.session_id = Some(event.session_id);
+        if let Some(m) = self.memlog.as_mut() {
+            m.set_session_id(event.session_id);
+        }
         self.add_to_history(history_cell::new_session_info(
             &self.config,
             event,
@@ -334,6 +346,15 @@ impl ChatWidget {
             },
             event.changes,
         ));
+        if self.memlog.is_some() {
+            let files = event
+                .changes
+                .iter()
+                .map(|(p, _)| p.to_string_lossy().to_string())
+                .collect::<Vec<_>>();
+            self.patch_calls
+                .insert(event.call_id.clone(), (Instant::now(), event.auto_approved, files));
+        }
     }
 
     fn on_patch_apply_end(&mut self, event: codex_core::protocol::PatchApplyEndEvent) {
@@ -479,7 +500,7 @@ impl ChatWidget {
             for (command, parsed, output) in pending {
                 let include_header = !self.last_history_was_exec;
                 let cell = history_cell::new_completed_exec_command(
-                    command,
+                    command.clone(),
                     parsed,
                     output,
                     include_header,
@@ -487,6 +508,14 @@ impl ChatWidget {
                 );
                 self.add_to_history(cell);
                 self.last_history_was_exec = true;
+                if let Some(m) = self.memlog.as_ref() {
+                    m.log_exec(
+                        &command,
+                        ev.exit_code,
+                        ev.duration,
+                        &ev.aggregated_output,
+                    );
+                }
             }
         }
     }
@@ -499,6 +528,18 @@ impl ChatWidget {
             self.add_to_history(history_cell::new_patch_apply_success(event.stdout));
         } else {
             self.add_to_history(history_cell::new_patch_apply_failure(event.stderr));
+        }
+        if let Some(m) = self.memlog.as_ref() {
+            if let Some((start, auto_approved, files)) = self.patch_calls.remove(&event.call_id) {
+                m.log_patch_apply(
+                    event.success,
+                    auto_approved,
+                    start.elapsed(),
+                    &event.stdout,
+                    &event.stderr,
+                    &files,
+                );
+            }
         }
     }
 
@@ -578,6 +619,22 @@ impl ChatWidget {
                 .unwrap_or(false),
             ev.result,
         ));
+        if let Some(m) = self.memlog.as_ref() {
+            let success = ev.is_success();
+            let result_json = ev
+                .result
+                .as_ref()
+                .map(|v| serde_json::to_value(v).unwrap_or(serde_json::Value::Null))
+                .ok();
+            m.log_tool_call(MemToolInvocation {
+                server: ev.invocation.server.clone(),
+                tool: ev.invocation.tool.clone(),
+                arguments: ev.invocation.arguments.clone(),
+                duration: ev.duration,
+                success,
+                result: result_json,
+            });
+        }
     }
 
     fn layout_areas(&self, area: Rect) -> [Rect; 2] {
@@ -600,10 +657,17 @@ impl ChatWidget {
         initial_prompt: Option<String>,
         initial_images: Vec<PathBuf>,
         enhanced_keys_supported: bool,
+        mem_enabled: bool,
     ) -> Self {
         let mut rng = rand::rng();
         let placeholder = EXAMPLE_PROMPTS[rng.random_range(0..EXAMPLE_PROMPTS.len())].to_string();
         let codex_op_tx = spawn_agent(config.clone(), app_event_tx.clone(), conversation_manager);
+
+        let memlog = if mem_enabled {
+            Some(MemoryLogger::new(config.cwd.clone()))
+        } else {
+            None
+        };
 
         Self {
             app_event_tx: app_event_tx.clone(),
@@ -636,6 +700,8 @@ impl ChatWidget {
             last_history_was_exec: false,
             queued_user_messages: VecDeque::new(),
             show_welcome_banner: true,
+            memlog,
+            patch_calls: HashMap::new(),
         }
     }
 
@@ -653,6 +719,25 @@ impl ChatWidget {
 
         let codex_op_tx =
             spawn_agent_from_existing(conversation, session_configured, app_event_tx.clone());
+
+        // Determine mem toggle from env for existing sessions
+        let mem_enabled = std::env::var("CODEX_PER_REPO_MEMORY")
+            .or_else(|_| std::env::var("CODEX_MEMORY"))
+            .ok()
+            .and_then(|v| {
+                let v = v.trim().to_ascii_lowercase();
+                match v.as_str() {
+                    "1" | "true" | "yes" | "on" => Some(true),
+                    "0" | "false" | "no" | "off" => Some(false),
+                    _ => None,
+                }
+            })
+            .unwrap_or(true);
+        let memlog = if mem_enabled {
+            Some(MemoryLogger::new(config.cwd.clone()))
+        } else {
+            None
+        };
 
         Self {
             app_event_tx: app_event_tx.clone(),
@@ -682,6 +767,8 @@ impl ChatWidget {
             last_history_was_exec: false,
             queued_user_messages: VecDeque::new(),
             show_welcome_banner: false,
+            memlog,
+            patch_calls: HashMap::new(),
         }
     }
 

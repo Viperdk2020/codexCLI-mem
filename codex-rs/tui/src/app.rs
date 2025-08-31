@@ -51,6 +51,9 @@ pub(crate) struct App {
 
     // Esc-backtracking state grouped
     pub(crate) backtrack: crate::app_backtrack::BacktrackState,
+
+    /// Whether per-repo memory logging is enabled for this run.
+    pub(crate) mem_enabled: bool,
 }
 
 impl App {
@@ -60,6 +63,7 @@ impl App {
         config: Config,
         initial_prompt: Option<String>,
         initial_images: Vec<PathBuf>,
+        mem_enabled: bool,
     ) -> Result<TokenUsage> {
         use tokio_stream::StreamExt;
         let (app_event_tx, mut app_event_rx) = unbounded_channel();
@@ -77,6 +81,7 @@ impl App {
             initial_prompt,
             initial_images,
             enhanced_keys_supported,
+            mem_enabled,
         );
 
         let file_search = FileSearchManager::new(config.cwd.clone(), app_event_tx.clone());
@@ -93,6 +98,7 @@ impl App {
             deferred_history_lines: Vec::new(),
             commit_anim_running: Arc::new(AtomicBool::new(false)),
             backtrack: BacktrackState::default(),
+            mem_enabled,
         };
 
         let tui_events = tui.event_stream();
@@ -174,6 +180,7 @@ impl App {
                     None,
                     Vec::new(),
                     self.enhanced_keys_supported,
+                    self.mem_enabled,
                 );
                 tui.frame_requester().schedule_frame();
             }

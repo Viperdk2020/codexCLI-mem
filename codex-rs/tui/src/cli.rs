@@ -3,6 +3,14 @@ use codex_common::ApprovalModeCliArg;
 use codex_common::CliConfigOverrides;
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Copy, clap::ValueEnum, PartialEq, Eq)]
+#[value(rename_all = "kebab-case")]
+pub enum MemoryToggle {
+    Auto,
+    On,
+    Off,
+}
+
 #[derive(Parser, Debug)]
 #[command(version)]
 pub struct Cli {
@@ -60,4 +68,8 @@ pub struct Cli {
 
     #[clap(skip)]
     pub config_overrides: CliConfigOverrides,
+
+    /// Control per-repo memory logging for this run (default: auto -> on).
+    #[arg(long = "memory", value_enum, default_value_t = MemoryToggle::Auto)]
+    pub memory: MemoryToggle,
 }
