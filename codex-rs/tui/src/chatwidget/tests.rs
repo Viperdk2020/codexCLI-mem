@@ -143,6 +143,7 @@ async fn helpers_are_available_and_do_not_panic() {
         None,
         Vec::new(),
         false,
+        false,
     );
     // Basic construction sanity.
     let _ = &mut w;
@@ -187,6 +188,9 @@ fn make_chatwidget_manual() -> (
         show_welcome_banner: true,
         last_history_was_exec: false,
         queued_user_messages: std::collections::VecDeque::new(),
+        memlog: None,
+        memory_preamble: None,
+        patch_calls: HashMap::new(),
     };
     (widget, rx, op_rx)
 }

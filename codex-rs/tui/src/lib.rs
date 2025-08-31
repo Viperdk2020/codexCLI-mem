@@ -25,6 +25,7 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::prelude::*;
 
 mod app;
+mod memory;
 mod app_backtrack;
 mod app_event;
 mod app_event_sender;
