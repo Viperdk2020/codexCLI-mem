@@ -841,6 +841,19 @@ impl ChatComposer {
                 if !text.is_empty() {
                     self.history.record_local_submission(&text);
                 }
+                // Inline handle a few lightweight commands without round-trip
+                if text.starts_with("/memory") {
+                    let parts: Vec<&str> = text.split_whitespace().collect();
+                    let msg = if parts.len() >= 3 && (parts[1] == "list" || parts[1] == "search") && parts[2].starts_with("tag:") {
+                        let tag = parts[2].trim_start_matches("tag:");
+                        let n = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(10);
+                        // Delegate rendering to ChatWidget via AppEvent
+                        format!("/memory list tag:{tag} {n}")
+                    } else {
+                        text.clone()
+                    };
+                    return (InputResult::Submitted(msg), true);
+                }
                 // Do not clear attached_images here; ChatWidget drains them via take_recent_submission_images().
                 (InputResult::Submitted(text), true)
             }

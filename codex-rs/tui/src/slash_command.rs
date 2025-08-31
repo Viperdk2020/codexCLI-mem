@@ -22,6 +22,7 @@ pub enum SlashCommand {
     Status,
     Mcp,
     Logout,
+    Memory,
     Quit,
     #[cfg(debug_assertions)]
     TestApproval,
@@ -42,6 +43,7 @@ impl SlashCommand {
             SlashCommand::Approvals => "choose what Codex can do without approval",
             SlashCommand::Mcp => "list configured MCP tools",
             SlashCommand::Logout => "log out of Codex",
+            SlashCommand::Memory => "manage per-repo memory (/memory ...)",
             #[cfg(debug_assertions)]
             SlashCommand::TestApproval => "test approval request",
         }
@@ -66,6 +68,7 @@ impl SlashCommand {
             | SlashCommand::Mention
             | SlashCommand::Status
             | SlashCommand::Mcp
+            | SlashCommand::Memory
             | SlashCommand::Quit => true,
 
             #[cfg(debug_assertions)]
