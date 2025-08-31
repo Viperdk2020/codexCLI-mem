@@ -615,3 +615,26 @@ Options that are specific to the TUI.
 | `projects.<path>.trust_level` | string | Mark project/worktree as trusted (only `"trusted"` is recognized). |
 | `preferred_auth_method` | `chatgpt` | `apikey` | Select default auth method (default: `chatgpt`). |
 | `tools.web_search` | boolean | Enable web search tool (alias: `web_search_request`) (default: false). |
+
+## Per-repo memory (local)
+
+Codex records a lightweight, per-repository memory of key actions to help you and external tools recall decisions and changes made in a project. This data is written locally to your repo and never leaves your machine.
+
+- Location: `<repo>/.codex/memory/memory.jsonl` (one JSON object per line)
+- Scope: Automatically associated with the repository that contains `.git/` or `.codex/`.
+- When entries are added:
+  - After shell tool calls (exec): command, exit code, duration, output preview
+  - After MCP tool calls: `server.tool(args)`, success, duration, optional result
+  - After patch application: auto_approved, success, duration, affected files
+- Common fields: `id`, `ts`, `repo`, `type`, `content`, `tags`, `files`, `session_id`, `source`, `metadata`
+
+Example (one line):
+
+```
+{"id":"…","ts":"2025-08-31T01:22:33.123Z","repo":"/path/to/repo","type":"exec","content":"rg --version","tags":["exec"],"files":[],"session_id":"…","source":"codex-rs","metadata":{"exit_code":0,"duration_ms":52,"output_preview":"ripgrep 14.1.0"}}
+```
+
+Notes
+- This store is local-only and intended for project memory/history.
+- Clearing: delete or truncate the file at `<repo>/.codex/memory/memory.jsonl`.
+- Backups/exports: copy the JSONL file anywhere (each line is an entry).
