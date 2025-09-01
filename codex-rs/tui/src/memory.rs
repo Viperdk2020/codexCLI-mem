@@ -9,6 +9,11 @@ use std::path::PathBuf;
 use std::time::Duration;
 use uuid::Uuid;
 
+#[cfg(feature = "memory-sqlite")]
+use codex_memory::factory;
+#[cfg(feature = "memory-sqlite")]
+use codex_memory::types::{Counters, Kind, MemoryItem, RelevanceHints, Scope, Status};
+
 pub(crate) struct MemoryLogger {
     repo_root: PathBuf,
     memory_dir: PathBuf,
@@ -56,7 +61,7 @@ impl MemoryLogger {
         {
             Ok(mut f) => {
                 if let Ok(s) = serde_json::to_string(value) {
-                    let _ = writeln!(f, "{}", s);
+                    let _ = writeln!(f, "{s}");
                 }
             }
             Err(e) => tracing::debug!("tui memory: open append failed: {e}"),
@@ -229,7 +234,7 @@ impl MemoryLogger {
             return None;
         }
         // Dedupe/merge by content prefix and tags; cap counts
-        let mut dedupe = |items: Vec<(String, Vec<String>)>, cap: usize| -> Vec<String> {
+        let dedupe = |items: Vec<(String, Vec<String>)>, cap: usize| -> Vec<String> {
             use std::collections::BTreeMap;
             let mut map: BTreeMap<String, (Vec<String>, usize)> = BTreeMap::new();
             for (c, tags) in items {
@@ -277,13 +282,37 @@ impl MemoryLogger {
             s.push_str("\n…");
         }
         Some(format!(
-            "Context: The following project memory may be helpful.\n{}\nPlease follow these preferences and consider these facts.",
-            s
+            "Context: The following project memory may be helpful.\n{s}\nPlease follow these preferences and consider these facts."
         ))
     }
 
     // Minimal durable ops for TUI slash commands.
     pub fn add_pref(&self, text: &str) -> anyhow::Result<()> {
+        if sqlite_enabled() {
+            #[cfg(feature = "memory-sqlite")]
+            {
+                let id = Uuid::new_v4().to_string();
+                let ts = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+                let item = MemoryItem {
+                    id,
+                    created_at: ts.clone(),
+                    updated_at: ts,
+                    schema_version: 1,
+                    source: "codex-tui".to_string(),
+                    scope: Scope::Repo,
+                    status: Status::Active,
+                    kind: Kind::Pref,
+                    content: text.to_string(),
+                    tags: vec!["pref".to_string()],
+                    relevance_hints: RelevanceHints { files: vec![], crates: vec![], languages: vec![], commands: vec![] },
+                    counters: Counters { seen_count: 0, used_count: 0, last_used_at: None },
+                    expiry: None,
+                };
+                let store = factory::open_repo_store(&self.repo_root, None)?;
+                store.add(item)?;
+                return Ok(());
+            }
+        }
         let id = Uuid::new_v4().to_string();
         let ts = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let value = json!({
@@ -303,6 +332,20 @@ impl MemoryLogger {
     }
 
     pub fn list_durable(&self, limit: usize) -> Vec<DurableItem> {
+        if sqlite_enabled() {
+            #[cfg(feature = "memory-sqlite")]
+            {
+                let Ok(store) = factory::open_repo_store(&self.repo_root, None) else { return vec![]; };
+                let Ok(mut items) = store.list(Some(Scope::Repo), Some(Status::Active)) else { return vec![]; };
+                // Only preferences and summaries (facts)
+                items.retain(|i| matches!(i.kind, Kind::Pref | Kind::Fact));
+                items.truncate(limit);
+                return items
+                    .into_iter()
+                    .map(|i| DurableItem { id: i.id, r#type: match i.kind { Kind::Pref => "pref".to_string(), _ => "summary".to_string() }, content: i.content })
+                    .collect();
+            }
+        }
         let Ok(file) = std::fs::File::open(&self.memory_file) else {
             return vec![];
         };
@@ -320,6 +363,18 @@ impl MemoryLogger {
     }
 
     pub fn search_durable(&self, query: &str, limit: usize) -> Vec<DurableItem> {
+        if sqlite_enabled() {
+            #[cfg(feature = "memory-sqlite")]
+            {
+                let q = query.to_ascii_lowercase();
+                return self
+                    .list_durable(usize::MAX)
+                    .into_iter()
+                    .filter(|i| i.content.to_ascii_lowercase().contains(&q))
+                    .take(limit)
+                    .collect();
+            }
+        }
         let q = query.to_ascii_lowercase();
         self.list_durable(usize::MAX)
             .into_iter()
@@ -329,6 +384,20 @@ impl MemoryLogger {
     }
 
     pub fn list_durable_tagged(&self, limit: usize, tag: &str) -> Vec<DurableItem> {
+        if sqlite_enabled() {
+            #[cfg(feature = "memory-sqlite")]
+            {
+                let t = tag.to_ascii_lowercase();
+                let Ok(store) = factory::open_repo_store(&self.repo_root, None) else { return vec![]; };
+                let Ok(mut items) = store.list(Some(Scope::Repo), Some(Status::Active)) else { return vec![]; };
+                items.retain(|i| i.tags.iter().any(|x| x.eq_ignore_ascii_case(&t)) && matches!(i.kind, Kind::Pref | Kind::Fact));
+                items.truncate(limit);
+                return items
+                    .into_iter()
+                    .map(|i| DurableItem { id: i.id, r#type: match i.kind { Kind::Pref => "pref".to_string(), _ => "summary".to_string() }, content: i.content })
+                    .collect();
+            }
+        }
         let t = tag.to_ascii_lowercase();
         let Ok(file) = std::fs::File::open(&self.memory_file) else {
             return vec![];
@@ -364,6 +433,26 @@ impl MemoryLogger {
     }
 
     pub fn delete_by_prefix(&self, prefix: &str) -> bool {
+        if sqlite_enabled() {
+            #[cfg(feature = "memory-sqlite")]
+            {
+                if prefix.is_empty() {
+                    return false;
+                }
+                if let Ok(store) = factory::open_repo_store(&self.repo_root, None)
+                    && let Ok(items) = store.list(Some(Scope::Repo), None) {
+                        let mut changed = false;
+                        for it in items {
+                            if (matches!(it.kind, Kind::Pref | Kind::Fact)) && it.id.starts_with(prefix) {
+                                let _ = store.delete(&it.id);
+                                changed = true;
+                            }
+                        }
+                        return changed;
+                    }
+                return false;
+            }
+        }
         if prefix.is_empty() {
             return false;
         }
@@ -386,15 +475,14 @@ impl MemoryLogger {
             }
             out.push(line);
         }
-        if changed {
-            if let Ok(mut f) = std::fs::OpenOptions::new()
+        if changed
+            && let Ok(mut f) = std::fs::OpenOptions::new()
                 .write(true)
                 .truncate(true)
                 .open(&self.memory_file)
             {
                 let _ = writeln!(f, "{}", out.join("\n"));
             }
-        }
         changed
     }
 }
@@ -441,6 +529,17 @@ fn detect_repo_root(start: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn sqlite_enabled() -> bool {
+    #[cfg(feature = "memory-sqlite")]
+    {
+        match std::env::var("CODEX_MEMORY_BACKEND") {
+            Ok(v) if v.eq_ignore_ascii_case("sqlite") => return true,
+            _ => {}
+        }
+    }
+    false
 }
 
 #[cfg(test)]

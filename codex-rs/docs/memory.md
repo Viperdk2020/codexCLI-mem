@@ -1,4 +1,4 @@
-# Codex Memory — Phase 1 Design (Local-First, ChatGPT-Style)
+# Codex Memory — Phase 1–2 (Local‑First)
 
 Goals
 - Persistent, user-controlled memories that improve replies across sessions.
@@ -48,3 +48,30 @@ Testing
 Out of Scope (Phase 1)
 - Embeddings/vector DB; shared/org memory; remote sync.
 
+## Phase 2 (Optional SQLite backend)
+
+Why: JSONL is simple and diff‑friendly, but updates require rewriting the file and queries get slower over time. An optional SQLite backend provides atomic updates, indexes, and faster listing/filters — while keeping JSONL as the default.
+
+What’s included (feature‑gated behind `codex-memory/sqlite`):
+- `SqliteMemoryStore` implementing the same `MemoryStore` trait.
+- Lightweight schema with JSON columns for `tags`, `relevance_hints`, `counters`, and `expiry`.
+- Import/Export from/to JSONL lines for easy backup and migration.
+- `stats()` for quick counts by scope and status.
+
+Selecting a backend
+- Build feature: enable with `--features codex-memory/sqlite` when building/running dependent crates.
+- Runtime env (optional):
+  - `CODEX_MEMORY_BACKEND=sqlite|jsonl` (defaults to `jsonl`).
+  - Repo paths: `CODEX_MEMORY_REPO_DB` or `CODEX_MEMORY_REPO_JSONL`.
+  - Home paths: `CODEX_MEMORY_HOME_DB` or `CODEX_MEMORY_HOME_JSONL`.
+
+Helper factory
+- `codex_memory::factory::{open_repo_store, open_global_store, choose_backend_from_env}` selects the backend and standard paths (repo: `<repo>/.codex/memory/…`, home: `~/.codex/memory/…`).
+
+Migration
+- API: `codex_memory::migrate::migrate_jsonl_to_sqlite(jsonl_path, sqlite_path)` (only when built with `sqlite`).
+- One‑shot: call migrate once, then set `CODEX_MEMORY_BACKEND=sqlite`. Both import/export remain available to move between formats.
+
+Notes
+- rusqlite is compiled with the bundled SQLite (`libsqlite3-sys/bundled`) to avoid system dependencies.
+- JSONL remains the default path; no behavior change unless the feature/env is set.

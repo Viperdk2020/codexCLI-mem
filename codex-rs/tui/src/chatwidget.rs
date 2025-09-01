@@ -407,9 +407,7 @@ impl ChatWidget {
         ));
         if self.memlog.is_some() {
             let files = event
-                .changes
-                .iter()
-                .map(|(p, _)| p.to_string_lossy().to_string())
+                .changes.keys().map(|p| p.to_string_lossy().to_string())
                 .collect::<Vec<_>>();
             self.patch_calls.insert(
                 event.call_id.clone(),
@@ -585,8 +583,8 @@ impl ChatWidget {
         } else {
             self.add_to_history(history_cell::new_patch_apply_failure(event.stderr.clone()));
         }
-        if let Some(m) = self.memlog.as_ref() {
-            if let Some((start, auto_approved, files)) = self.patch_calls.remove(&event.call_id) {
+        if let Some(m) = self.memlog.as_ref()
+            && let Some((start, auto_approved, files)) = self.patch_calls.remove(&event.call_id) {
                 m.log_patch_apply(
                     event.success,
                     auto_approved,
@@ -596,7 +594,6 @@ impl ChatWidget {
                     &files,
                 );
             }
-        }
     }
 
     pub(crate) fn handle_exec_approval_now(&mut self, id: String, ev: ExecApprovalRequestEvent) {

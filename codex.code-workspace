@@ -5,6 +5,10 @@
 		}
 	],
 	"settings": {
-		"chatgpt.openOnStartup": true
+		"chatgpt.openOnStartup": true,
+		"chatgpt.commentCodeLensEnabled": true,
+		
+			
 	}
+	
 }

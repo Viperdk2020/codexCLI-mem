@@ -16,3 +16,6 @@ pub trait MemoryStore: Send + Sync {
 }
 
 pub mod jsonl;
+
+#[cfg(feature = "sqlite")]
+pub mod sqlite;

@@ -1,9 +1,12 @@
 //! Local-first "Memory" scaffolding inspired by ChatGPT-style memories.
 //! Phase 1: deterministic, JSONL-backed store with CRUD and simple recall.
 
-use serde::{Deserialize, Serialize};
-use std::collections::{BTreeSet, HashMap};
-use std::path::{Path, PathBuf};
+use serde::Deserialize;
+use serde::Serialize;
+use std::collections::BTreeSet;
+use std::collections::HashMap;
+use std::path::Path;
+use std::path::PathBuf;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -260,22 +263,24 @@ impl MemoryStore for JsonlMemoryStore {
             };
             // Hints: file/crate/lang
             if let Some(f) = ctx.current_file
-                && it.relevance_hints.files.iter().any(|h| f.ends_with(h)) {
-                    s += 0.4;
-                }
+                && it.relevance_hints.files.iter().any(|h| f.ends_with(h))
+            {
+                s += 0.4;
+            }
             if let Some(c) = ctx.current_crate
-                && it.relevance_hints.crates.iter().any(|h| h == c) {
-                    s += 0.3;
-                }
+                && it.relevance_hints.crates.iter().any(|h| h == c)
+            {
+                s += 0.3;
+            }
             if let Some(l) = ctx.lang
                 && it
                     .relevance_hints
                     .langs
                     .iter()
                     .any(|h| h.eq_ignore_ascii_case(l))
-                {
-                    s += 0.2;
-                }
+            {
+                s += 0.2;
+            }
             // Tags light boost when overlapping prompt tokens
             if it
                 .tags
@@ -324,7 +329,6 @@ fn overlap_score(a: &BTreeSet<String>, b: &BTreeSet<String>) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     #[test]
     fn add_and_recall_basic() {
