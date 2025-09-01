@@ -62,18 +62,18 @@ You can also use Codex with an API key, but this requires [additional setup](./d
 
 Codex CLI supports [MCP servers](./docs/advanced.md#model-context-protocol-mcp). Enable by adding an `mcp_servers` section to your `~/.codex/config.toml`.
 
-
 ### Configuration
 
 Codex CLI supports a rich set of configuration options, with preferences stored in `~/.codex/config.toml`. For full configuration options, see [Configuration](./docs/config.md).
 
 ### Per‑repo memory (local)
 
-Codex keeps a lightweight, per‑repository memory of key actions to help you recall decisions and changes in each project. Entries are written locally to `<repo>/.codex/memory/memory.jsonl` after tool use (shell exec, MCP tool calls) and patch application. The file is plain JSONL so you can search, back up, or clear it easily. See [Per‑repo memory](./docs/config.md#per-repo-memory-local) for details.
+Codex keeps a lightweight, per‑repository memory of key actions to help you recall decisions and changes in each project. Entries are written locally to `<repo>/.codex/memory/memory.jsonl` after tool use (shell exec, MCP tool calls) and patch application. The file is plain JSONL so you can search, back up, or clear it easily. For choosing the optional SQLite backend or migrating existing data, see [Memory backends](./docs/memory-backends.md). See [Per‑repo memory](./docs/config.md#per-repo-memory-local) for configuration details.
 
 Toggle per run (TUI or exec): add `--memory off` to disable, or `--memory on` to force‑enable. You can also set `CODEX_PER_REPO_MEMORY=0|1`.
 
 Durable memory and smarter preamble
+
 - Durable items: In addition to action logs (exec, tool, change), Codex records durable items you and Codex can reuse across turns:
   - `pref`: your preferences and decisions (e.g., “Prefer Ruff + Black”).
   - `summary`: short outcomes/facts captured on task completion.
@@ -81,6 +81,7 @@ Durable memory and smarter preamble
 - Smarter preamble: On new sessions, Codex injects a short “project memory” preamble built from recent `pref` and `summary` items. It deduplicates, merges tags, caps counts, and enforces a length limit so your prompt stays concise.
 
 TUI: memory slash commands
+
 - Add preference: `/memory add Use Ruff + Black`
 - List recent durable: `/memory list 10`
 - Search durable: `/memory search ruff`
@@ -89,6 +90,7 @@ TUI: memory slash commands
 - Help: `/memory help`
 
 What gets logged automatically (TUI)
+
 - On task complete: a `summary` durable item with a compact preview of the last assistant message (kept brief).
 - On approval request: a `decision` durable item noting the request (exec/patch).
 
