@@ -9,12 +9,17 @@ use std::path::PathBuf;
 use std::time::Duration;
 use uuid::Uuid;
 
-#[cfg(feature = "memory-sqlite")]
 use codex_memory::factory;
-#[cfg(feature = "memory-sqlite")]
-use codex_memory::types::{Counters, Kind, MemoryItem, RelevanceHints, Scope, Status};
+use codex_memory::recall::RecallContext;
+use codex_memory::recall::{self};
+use codex_memory::types::Counters;
+use codex_memory::types::Kind;
+use codex_memory::types::MemoryItem;
+use codex_memory::types::RelevanceHints;
+use codex_memory::types::Scope;
+use codex_memory::types::Status;
 
-pub(crate) struct MemoryLogger {
+pub struct MemoryLogger {
     repo_root: PathBuf,
     memory_dir: PathBuf,
     memory_file: PathBuf,
@@ -197,43 +202,33 @@ impl MemoryLogger {
 
     // Build a short preamble string from durable memory items (prefs/summaries).
     pub fn build_durable_preamble(&self, max_len: usize) -> Option<String> {
-        let path = self.memory_file.as_path();
-        let Ok(file) = std::fs::File::open(path) else {
+        let store = factory::open_repo_store(&self.repo_root, None).ok()?;
+        let ctx = RecallContext {
+            repo_root: Some(self.repo_root.clone()),
+            dir: None,
+            current_file: None,
+            crate_name: None,
+            language: None,
+            command: None,
+            now_rfc3339: Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            item_cap: 16,
+            token_cap: max_len * 2,
+        };
+        let Ok(items) = recall::recall(store.as_ref(), "", &ctx) else {
             return None;
         };
-        let reader = std::io::BufReader::new(file);
         let mut prefs: Vec<(String, Vec<String>)> = Vec::new();
         let mut summaries: Vec<(String, Vec<String>)> = Vec::new();
-        for line in std::io::BufRead::lines(reader).flatten() {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
-                let t = v.get("type").and_then(|x| x.as_str()).unwrap_or("");
-                if t == "pref" || t == "summary" {
-                    let c = v
-                        .get("content")
-                        .and_then(|x| x.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    let tags: Vec<String> = v
-                        .get("tags")
-                        .and_then(|x| x.as_array())
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|t| t.as_str().map(|s| s.to_string()))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    if t == "pref" {
-                        prefs.push((c, tags));
-                    } else {
-                        summaries.push((c, tags));
-                    }
-                }
+        for it in items {
+            match it.kind {
+                Kind::Pref => prefs.push((it.content, it.tags)),
+                Kind::Fact => summaries.push((it.content, it.tags)),
+                _ => {}
             }
         }
         if prefs.is_empty() && summaries.is_empty() {
             return None;
         }
-        // Dedupe/merge by content prefix and tags; cap counts
         let dedupe = |items: Vec<(String, Vec<String>)>, cap: usize| -> Vec<String> {
             use std::collections::BTreeMap;
             let mut map: BTreeMap<String, (Vec<String>, usize)> = BTreeMap::new();
@@ -304,8 +299,17 @@ impl MemoryLogger {
                     kind: Kind::Pref,
                     content: text.to_string(),
                     tags: vec!["pref".to_string()],
-                    relevance_hints: RelevanceHints { files: vec![], crates: vec![], languages: vec![], commands: vec![] },
-                    counters: Counters { seen_count: 0, used_count: 0, last_used_at: None },
+                    relevance_hints: RelevanceHints {
+                        files: vec![],
+                        crates: vec![],
+                        languages: vec![],
+                        commands: vec![],
+                    },
+                    counters: Counters {
+                        seen_count: 0,
+                        used_count: 0,
+                        last_used_at: None,
+                    },
                     expiry: None,
                 };
                 let store = factory::open_repo_store(&self.repo_root, None)?;
@@ -335,14 +339,25 @@ impl MemoryLogger {
         if sqlite_enabled() {
             #[cfg(feature = "memory-sqlite")]
             {
-                let Ok(store) = factory::open_repo_store(&self.repo_root, None) else { return vec![]; };
-                let Ok(mut items) = store.list(Some(Scope::Repo), Some(Status::Active)) else { return vec![]; };
+                let Ok(store) = factory::open_repo_store(&self.repo_root, None) else {
+                    return vec![];
+                };
+                let Ok(mut items) = store.list(Some(Scope::Repo), Some(Status::Active)) else {
+                    return vec![];
+                };
                 // Only preferences and summaries (facts)
                 items.retain(|i| matches!(i.kind, Kind::Pref | Kind::Fact));
                 items.truncate(limit);
                 return items
                     .into_iter()
-                    .map(|i| DurableItem { id: i.id, r#type: match i.kind { Kind::Pref => "pref".to_string(), _ => "summary".to_string() }, content: i.content })
+                    .map(|i| DurableItem {
+                        id: i.id,
+                        r#type: match i.kind {
+                            Kind::Pref => "pref".to_string(),
+                            _ => "summary".to_string(),
+                        },
+                        content: i.content,
+                    })
                     .collect();
             }
         }
@@ -388,13 +403,27 @@ impl MemoryLogger {
             #[cfg(feature = "memory-sqlite")]
             {
                 let t = tag.to_ascii_lowercase();
-                let Ok(store) = factory::open_repo_store(&self.repo_root, None) else { return vec![]; };
-                let Ok(mut items) = store.list(Some(Scope::Repo), Some(Status::Active)) else { return vec![]; };
-                items.retain(|i| i.tags.iter().any(|x| x.eq_ignore_ascii_case(&t)) && matches!(i.kind, Kind::Pref | Kind::Fact));
+                let Ok(store) = factory::open_repo_store(&self.repo_root, None) else {
+                    return vec![];
+                };
+                let Ok(mut items) = store.list(Some(Scope::Repo), Some(Status::Active)) else {
+                    return vec![];
+                };
+                items.retain(|i| {
+                    i.tags.iter().any(|x| x.eq_ignore_ascii_case(&t))
+                        && matches!(i.kind, Kind::Pref | Kind::Fact)
+                });
                 items.truncate(limit);
                 return items
                     .into_iter()
-                    .map(|i| DurableItem { id: i.id, r#type: match i.kind { Kind::Pref => "pref".to_string(), _ => "summary".to_string() }, content: i.content })
+                    .map(|i| DurableItem {
+                        id: i.id,
+                        r#type: match i.kind {
+                            Kind::Pref => "pref".to_string(),
+                            _ => "summary".to_string(),
+                        },
+                        content: i.content,
+                    })
                     .collect();
             }
         }
@@ -440,16 +469,18 @@ impl MemoryLogger {
                     return false;
                 }
                 if let Ok(store) = factory::open_repo_store(&self.repo_root, None)
-                    && let Ok(items) = store.list(Some(Scope::Repo), None) {
-                        let mut changed = false;
-                        for it in items {
-                            if (matches!(it.kind, Kind::Pref | Kind::Fact)) && it.id.starts_with(prefix) {
-                                let _ = store.delete(&it.id);
-                                changed = true;
-                            }
+                    && let Ok(items) = store.list(Some(Scope::Repo), None)
+                {
+                    let mut changed = false;
+                    for it in items {
+                        if (matches!(it.kind, Kind::Pref | Kind::Fact)) && it.id.starts_with(prefix)
+                        {
+                            let _ = store.delete(&it.id);
+                            changed = true;
                         }
-                        return changed;
                     }
+                    return changed;
+                }
                 return false;
             }
         }
@@ -480,9 +511,9 @@ impl MemoryLogger {
                 .write(true)
                 .truncate(true)
                 .open(&self.memory_file)
-            {
-                let _ = writeln!(f, "{}", out.join("\n"));
-            }
+        {
+            let _ = writeln!(f, "{}", out.join("\n"));
+        }
         changed
     }
 }
@@ -561,21 +592,43 @@ mod tests {
     fn preamble_dedupes_merges_and_caps() {
         let dir = tempdir().unwrap();
         let repo = dir.path().to_path_buf();
-        let memdir = repo.join(".codex").join("memory");
-        fs::create_dir_all(&memdir).unwrap();
-        let memfile = memdir.join("memory.jsonl");
-
-        // Create a mix of durable prefs and summaries with duplicate content and tags.
-        let lines = vec![
-            json!({"id":"1","ts":"2025-01-01T00:00:00.000Z","repo":repo,"type":"pref","content":"prefer ruff","tags":["python","style"],"files":[],"session_id":null,"source":"test","metadata":{}}),
-            json!({"id":"2","ts":"2025-01-01T00:00:01.000Z","repo":repo,"type":"pref","content":"Prefer Ruff","tags":["style"],"files":[],"session_id":null,"source":"test","metadata":{}}),
-            json!({"id":"3","ts":"2025-01-01T00:00:02.000Z","repo":repo,"type":"summary","content":"uses pytest","tags":["python"],"files":[],"session_id":null,"source":"test","metadata":{}}),
-            json!({"id":"4","ts":"2025-01-01T00:00:03.000Z","repo":repo,"type":"summary","content":"Uses PyTest","tags":["ci"],"files":[],"session_id":null,"source":"test","metadata":{}}),
-        ];
-        write_jsonl(&memfile, &lines);
+        fs::create_dir_all(repo.join(".codex").join("memory")).unwrap();
+        let store = factory::open_repo_store(&repo, None).unwrap();
+        let ts = "2025-01-01T00:00:00.000Z".to_string();
+        let item = MemoryItem {
+            id: "1".into(),
+            created_at: ts.clone(),
+            updated_at: ts.clone(),
+            schema_version: 1,
+            source: "test".into(),
+            scope: Scope::Repo,
+            status: Status::Active,
+            kind: Kind::Pref,
+            content: "prefer ruff".into(),
+            tags: vec!["python".into(), "style".into()],
+            relevance_hints: RelevanceHints { files: vec![], crates: vec![], languages: vec![], commands: vec![] },
+            counters: Counters { seen_count: 0, used_count: 0, last_used_at: None },
+            expiry: None,
+        };
+        store.add(item).unwrap();
+        let mut item2 = store.get("1").unwrap().unwrap();
+        item2.id = "2".into();
+        item2.content = "Prefer Ruff".into();
+        item2.tags = vec!["style".into()];
+        store.add(item2).unwrap();
+        let mut fact = store.get("1").unwrap().unwrap();
+        fact.id = "3".into();
+        fact.kind = Kind::Fact;
+        fact.content = "uses pytest".into();
+        fact.tags = vec!["python".into()];
+        store.add(fact).unwrap();
+        let mut fact2 = store.get("3").unwrap().unwrap();
+        fact2.id = "4".into();
+        fact2.content = "Uses PyTest".into();
+        fact2.tags = vec!["ci".into()];
+        store.add(fact2).unwrap();
 
         let mut logger = MemoryLogger::new(repo.clone());
-        // Ensure we read from the temp repo
         logger.session_id = Some("test".into());
         let pre = logger.build_durable_preamble(512).expect("preamble");
 

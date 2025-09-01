@@ -35,10 +35,10 @@ pub fn open_repo_store(
     let be = backend.unwrap_or_else(choose_backend_from_env);
     Ok(match be {
         Backend::Jsonl => {
-            let _path = std::env::var("CODEX_MEMORY_REPO_JSONL")
+            let path = std::env::var("CODEX_MEMORY_REPO_JSONL")
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|_| base.join("memory.jsonl"));
-            Box::new(JsonlMemoryStore)
+            Box::new(JsonlMemoryStore::new(path))
         }
         #[cfg(feature = "sqlite")]
         Backend::Sqlite => {
@@ -62,10 +62,10 @@ pub fn open_global_store(
     let be = backend.unwrap_or_else(choose_backend_from_env);
     Ok(match be {
         Backend::Jsonl => {
-            let _path = std::env::var("CODEX_MEMORY_HOME_JSONL")
+            let path = std::env::var("CODEX_MEMORY_HOME_JSONL")
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|_| base.join("memory.jsonl"));
-            Box::new(JsonlMemoryStore)
+            Box::new(JsonlMemoryStore::new(path))
         }
         #[cfg(feature = "sqlite")]
         Backend::Sqlite => {

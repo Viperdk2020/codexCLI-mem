@@ -17,7 +17,7 @@ vt100-tests = []
 # Gate verbose debug logging inside the TUI implementation.
 debug-logs = []
 # Opt-in: allow using SQLite memory backend from codex-memory.
-memory-sqlite = ["codex-memory/sqlite", "codex-memory"]
+memory-sqlite = ["codex-memory/sqlite"]
 
 [lints]
 workspace = true
@@ -39,7 +39,7 @@ codex-common = { path = "../common", features = [
 codex-core = { path = "../core" }
 codex-file-search = { path = "../file-search" }
 codex-login = { path = "../login" }
-codex-memory = { path = "../memory", optional = true }
+codex-memory = { path = "../memory" }
 codex-ollama = { path = "../ollama" }
 codex-protocol = { path = "../protocol" }
 color-eyre = "0.6.3"
