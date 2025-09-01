@@ -18,6 +18,7 @@ use codex_tui::Cli as TuiCli;
 use std::path::PathBuf;
 
 use crate::proto::ProtoCli;
+use codex_cli::memory::MemoryCli;
 
 /// Codex CLI
 ///
@@ -72,6 +73,9 @@ enum Subcommand {
     /// Apply the latest diff produced by Codex agent as a `git apply` to your local working tree.
     #[clap(visible_alias = "a")]
     Apply(ApplyCommand),
+
+    /// Manage persistent memory items.
+    Memory(MemoryCli),
 
     /// Internal: generate TypeScript protocol bindings.
     #[clap(hide = true)]
@@ -208,6 +212,9 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
         Some(Subcommand::Apply(mut apply_cli)) => {
             prepend_config_flags(&mut apply_cli.config_overrides, cli.config_overrides);
             run_apply_command(apply_cli, None).await?;
+        }
+        Some(Subcommand::Memory(memory_cli)) => {
+            codex_cli::memory::run(memory_cli)?;
         }
         Some(Subcommand::GenerateTs(gen_cli)) => {
             codex_protocol_ts::generate_ts(&gen_cli.out_dir, gen_cli.prettier.as_deref())?;
