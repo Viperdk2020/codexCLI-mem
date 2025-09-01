@@ -302,7 +302,20 @@ impl MemoryStore for JsonlMemoryStore {
         });
 
         let n = ctx.want.max(1).min(8);
-        Ok(items.into_iter().take(n).collect())
+        let now = now_rfc3339();
+        let mut out: Vec<MemoryItem> = Vec::new();
+        let mut changed = false;
+        for it in items.iter_mut().take(n) {
+            it.counters.used_count = it.counters.used_count.saturating_add(1);
+            it.counters.last_used_at = Some(now.clone());
+            it.updated_at = now.clone();
+            changed = true;
+            out.push(it.clone());
+        }
+        if changed {
+            self.write_all(&items)?;
+        }
+        Ok(out)
     }
 }
 
@@ -359,5 +372,43 @@ mod tests {
         let out = store.recall(&ctx).unwrap();
         assert!(!out.is_empty());
         assert!(out.iter().any(|i| i.content.contains("rg")));
+    }
+
+    #[test]
+    fn counters_persist_across_recall() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mem.jsonl");
+        let store = JsonlMemoryStore::new(&path);
+        store
+            .add(MemoryItem::new(
+                MemoryScope::Global,
+                MemoryType::Pref,
+                "Remember me".to_string(),
+            ))
+            .unwrap();
+
+        let ctx = RecallContext {
+            prompt: "remember",
+            current_file: None,
+            current_crate: None,
+            lang: None,
+            want: 1,
+        };
+
+        // First recall updates counters
+        let out1 = store.recall(&ctx).unwrap();
+        assert_eq!(out1[0].counters.used_count, 1);
+        let last1 = out1[0].counters.last_used_at.clone();
+        assert!(last1.is_some());
+
+        // Second recall reads persisted counters
+        let store2 = JsonlMemoryStore::new(&path);
+        let out2 = store2.recall(&ctx).unwrap();
+        assert_eq!(out2[0].counters.used_count, 2);
+        let last2 = out2[0].counters.last_used_at.clone();
+        assert!(last2.is_some());
+        if let (Some(a), Some(b)) = (last1, last2) {
+            assert!(b >= a);
+        }
     }
 }
