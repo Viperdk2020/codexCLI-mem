@@ -1,24 +1,21 @@
 # Memory backends
 
-Codex stores per-repository memory to help recall decisions and context. Two storage formats are available:
+Codex stores per-repo state so you and the CLI can recall decisions across sessions. Two storage backends are available.
 
 ## JSONL (default)
 
-- One line per entry at `.codex/memory/memory.jsonl` inside each repo.
-- Human-readable and easy to back up or edit with standard tools.
+- One JSON object per line, easy to inspect and back up.
+- Paths: `<repo>/.codex/memory/memory.jsonl` or `~/.codex/memory/memory.jsonl`.
+- Works out of the box and is diff‑friendly for version control.
 
 ## SQLite (optional)
 
-- Stores entries in `.codex/memory/memory.db`.
-- Offers atomic updates, indexing and faster queries.
-- Requires a build with SQLite support and enabling at runtime.
+- Adds atomic updates and indexes for faster queries.
+- Paths: `<repo>/.codex/memory/memory.db` or `~/.codex/memory/memory.db`.
+- Requires a build with the SQLite feature (`--features codex-memory/sqlite`).
+- Select at runtime with `CODEX_MEMORY_BACKEND=sqlite` (defaults to `jsonl`).
 
-### Enabling SQLite
-
-1. Ensure your Codex build includes the `sqlite` feature (pre-built binaries include it).
-2. Set `CODEX_MEMORY_BACKEND=sqlite` in the environment.
-
-### Migrating existing data
+## Migrating existing data
 
 Convert an existing JSONL store to SQLite:
 
@@ -26,16 +23,16 @@ Convert an existing JSONL store to SQLite:
 codex memory migrate
 ```
 
-This reads `memory.jsonl` and writes `memory.db` in the same directory.
+After migration, enable SQLite with `CODEX_MEMORY_BACKEND=sqlite`.
 
-### Compaction
+## Compacting
 
-To reclaim free space in the SQLite database:
+Reclaim space and keep the store tidy:
 
 ```bash
 codex memory compact
 ```
 
-This runs `VACUUM` on `memory.db`.
+This vacuums a SQLite database or rewrites a JSONL file to drop unused entries.
 
 Unsetting `CODEX_MEMORY_BACKEND` returns Codex to the default JSONL backend.

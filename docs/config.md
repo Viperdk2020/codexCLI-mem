@@ -619,6 +619,8 @@ Options that are specific to the TUI.
 
 Codex records a lightweight, per-repository memory of key actions to help you and external tools recall decisions and changes made in a project. This data is written locally to your repo and never leaves your machine.
 
+For backend options and maintenance commands, see [memory backends](./memory-backends.md).
+
 - Location: `<repo>/.codex/memory/memory.jsonl` (one JSON object per line)
 - Scope: Automatically associated with the repository that contains `.git/` or `.codex/`.
 - When entries are added:
