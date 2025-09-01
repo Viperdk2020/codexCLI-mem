@@ -1,13 +1,16 @@
 use super::*;
+use std::io::Write;
+use std::path::Path;
+use std::path::PathBuf;
 
-#[derive(Debug, Clone)]
+/// Simple JSONL-backed memory store used for both durable history and recall.
 pub struct JsonlMemoryStore {
-    path: std::path::PathBuf,
+    path: PathBuf,
 }
 
 impl JsonlMemoryStore {
-    pub fn new<P: Into<std::path::PathBuf>>(path: P) -> Self {
-        Self { path: path.into() }
+    pub fn new<P: AsRef<Path>>(path: P) -> Self {
+        Self { path: path.as_ref().to_path_buf() }
     }
 
     fn read_all(&self) -> anyhow::Result<Vec<MemoryItem>> {
@@ -18,26 +21,25 @@ impl JsonlMemoryStore {
         };
         let mut items = Vec::new();
         for line in data.lines() {
-            let line = line.trim();
-            if line.is_empty() {
+            if line.trim().is_empty() {
                 continue;
             }
-            match serde_json::from_str::<MemoryItem>(line) {
-                Ok(item) => items.push(item),
-                Err(_) => continue, // skip noisy lines
+            if let Ok(it) = serde_json::from_str::<MemoryItem>(line) {
+                items.push(it);
             }
         }
         Ok(items)
     }
 
     fn write_all(&self, items: &[MemoryItem]) -> anyhow::Result<()> {
-        if let Some(dir) = self.path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
         let mut out = String::new();
         for it in items {
-            out.push_str(&serde_json::to_string(it)?);
+            let line = serde_json::to_string(it)?;
+            out.push_str(&line);
             out.push('\n');
+        }
+        if let Some(dir) = self.path.parent() {
+            std::fs::create_dir_all(dir)?;
         }
         std::fs::write(&self.path, out)?;
         Ok(())
@@ -51,7 +53,6 @@ impl MemoryStore for JsonlMemoryStore {
         }
         let mut line = serde_json::to_string(&item)?;
         line.push('\n');
-        use std::io::Write as _;
         let mut f = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -94,32 +95,25 @@ impl MemoryStore for JsonlMemoryStore {
         if let Some(st) = status {
             items.retain(|i| i.status == st);
         }
-        items.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         Ok(items)
     }
 
     fn archive(&self, id: &str, archived: bool) -> anyhow::Result<()> {
         let mut items = self.read_all()?;
-        let st = if archived {
-            Status::Archived
-        } else {
-            Status::Active
-        };
-        let mut found = false;
         for it in &mut items {
             if it.id == id {
-                it.status = st.clone();
-                found = true;
+                it.status = if archived {
+                    Status::Archived
+                } else {
+                    Status::Active
+                };
             }
-        }
-        if !found {
-            anyhow::bail!("archive: id not found: {id}");
         }
         self.write_all(&items)
     }
 
     fn export(&self, out: &mut dyn std::io::Write) -> anyhow::Result<()> {
-        let items = self.list(None, None)?;
+        let items = self.read_all()?;
         for it in items {
             let line = serde_json::to_string(&it)?;
             out.write_all(line.as_bytes())?;
@@ -137,15 +131,10 @@ impl MemoryStore for JsonlMemoryStore {
         let mut count = 0usize;
         for line in data.lines() {
             let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            match serde_json::from_str::<MemoryItem>(line) {
-                Ok(item) => {
-                    map.insert(item.id.clone(), item);
-                    count += 1;
-                }
-                Err(_) => continue,
+            if line.is_empty() { continue; }
+            if let Ok(item) = serde_json::from_str::<MemoryItem>(line) {
+                map.insert(item.id.clone(), item);
+                count += 1;
             }
         }
         let mut items: Vec<MemoryItem> = map.into_values().collect();
@@ -165,11 +154,7 @@ impl MemoryStore for JsonlMemoryStore {
         let mut by_scope = serde_json::Map::new();
         for sc in [Scope::Global, Scope::Repo, Scope::Dir] {
             let n = items.iter().filter(|i| i.scope == sc).count();
-            let key = match sc {
-                Scope::Global => "global",
-                Scope::Repo => "repo",
-                Scope::Dir => "dir",
-            };
+            let key = match sc { Scope::Global => "global", Scope::Repo => "repo", Scope::Dir => "dir" };
             by_scope.insert(key.to_string(), serde_json::json!(n));
         }
         Ok(serde_json::json!({

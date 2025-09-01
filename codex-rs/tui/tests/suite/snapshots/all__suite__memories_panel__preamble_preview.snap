@@ -1,0 +1,12 @@
+---
+source: tui/tests/suite/memories_panel.rs
+assertion_line: 54
+expression: pre
+---
+Context: The following project memory may be helpful.
+Project preferences:
+- respect editorconfig
+
+Project facts:
+- tests use cargo test
+Please follow these preferences and consider these facts.

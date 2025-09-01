@@ -1,8 +1,6 @@
 use crate::store::MemoryStore;
-use crate::types::MemoryItem;
-use crate::types::Status;
-use chrono::DateTime;
-use chrono::Utc;
+use crate::types::{MemoryItem, Status};
+use chrono::{DateTime, Utc};
 use std::collections::BTreeSet;
 
 pub struct RecallContext {
@@ -103,3 +101,4 @@ fn overlap_score(a: &BTreeSet<String>, b: &BTreeSet<String>) -> f32 {
     let inter = a.intersection(b).count() as f32;
     inter / a.len() as f32
 }
+

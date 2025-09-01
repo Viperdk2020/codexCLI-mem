@@ -1,0 +1,10 @@
+---
+source: tui/tests/suite/memories_panel.rs
+expression: terminal.backend()
+---
+"Memories:                               "
+"- Use ripgrep for search                "
+"- Avoid force pushes                    "
+"                                        "
+"                                        "
+"                                        "
