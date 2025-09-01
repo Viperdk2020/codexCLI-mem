@@ -57,6 +57,9 @@ enum Subcommand {
     /// Remove stored authentication credentials.
     Logout(LogoutCommand),
 
+    /// Memory utilities.
+    Memory(MemoryCommand),
+
     /// Experimental: run Codex as an MCP server.
     Mcp,
 
@@ -120,6 +123,43 @@ struct LoginCommand {
 enum LoginSubcommand {
     /// Show login status.
     Status,
+}
+
+#[derive(Debug, Parser)]
+struct MemoryCommand {
+    #[command(subcommand)]
+    action: MemorySubcommand,
+}
+
+#[derive(Debug, clap::Subcommand)]
+enum MemorySubcommand {
+    /// Migrate a JSONL memory file to SQLite.
+    Migrate(MemoryMigrateArgs),
+
+    /// Compact a JSONL memory file by removing duplicate ids.
+    Compact(MemoryCompactArgs),
+}
+
+#[derive(Debug, Parser)]
+struct MemoryMigrateArgs {
+    /// Source JSONL file
+    #[arg(long, value_name = "JSONL")]
+    jsonl: std::path::PathBuf,
+
+    /// Destination SQLite database file
+    #[arg(long, value_name = "SQLITE")]
+    sqlite: std::path::PathBuf,
+}
+
+#[derive(Debug, Parser)]
+struct MemoryCompactArgs {
+    /// Input JSONL file to compact
+    #[arg(long, value_name = "INPUT")]
+    input: std::path::PathBuf,
+
+    /// Output JSONL file (defaults to in-place)
+    #[arg(long, value_name = "OUTPUT")]
+    output: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Parser)]
@@ -188,6 +228,9 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
             prepend_config_flags(&mut proto_cli.config_overrides, cli.config_overrides);
             proto::run_main(proto_cli).await?;
         }
+        Some(Subcommand::Memory(memory_cli)) => {
+            run_memory_command(memory_cli).await?;
+        }
         Some(Subcommand::Completion(completion_cli)) => {
             print_completion(completion_cli);
         }
@@ -221,6 +264,40 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
         }
     }
 
+    Ok(())
+}
+
+async fn run_memory_command(cmd: MemoryCommand) -> anyhow::Result<()> {
+    match cmd.action {
+        MemorySubcommand::Migrate(args) => {
+            eprintln!(
+                "Migrating {} -> {}...",
+                args.jsonl.display(),
+                args.sqlite.display()
+            );
+            let pb = indicatif::ProgressBar::new_spinner();
+            pb.enable_steady_tick(std::time::Duration::from_millis(100));
+            let count = codex_memory::migrate::migrate_jsonl_to_sqlite(&args.jsonl, &args.sqlite)?;
+            pb.finish_and_clear();
+            println!("Migrated {count} entries");
+        }
+        MemorySubcommand::Compact(args) => {
+            let out = args.output.unwrap_or_else(|| args.input.clone());
+            eprintln!(
+                "Compacting {} -> {}...",
+                args.input.display(),
+                out.display()
+            );
+            let pb = indicatif::ProgressBar::new_spinner();
+            pb.enable_steady_tick(std::time::Duration::from_millis(100));
+            let (read, written) = codex_memory::migrate::compact_jsonl(&args.input, &out)?;
+            pb.finish_and_clear();
+            println!(
+                "Read {read} entries, wrote {written} entries (removed {})",
+                read - written
+            );
+        }
+    }
     Ok(())
 }
 
