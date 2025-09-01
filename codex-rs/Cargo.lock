@@ -1420,6 +1420,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-memory"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "codex-ollama"
 version = "0.0.0"
 dependencies = [

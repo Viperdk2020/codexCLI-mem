@@ -11,6 +11,7 @@ members = [
     "file-search",
     "linux-sandbox",
     "login",
+    "memory",
     "mcp-client",
     "mcp-server",
     "mcp-types",
