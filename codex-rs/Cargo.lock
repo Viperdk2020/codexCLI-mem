@@ -1424,6 +1424,7 @@ name = "codex-memory"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",
