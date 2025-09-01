@@ -302,7 +302,18 @@ impl MemoryStore for JsonlMemoryStore {
         });
 
         let n = ctx.want.max(1).min(8);
-        Ok(items.into_iter().take(n).collect())
+        let now = now_rfc3339();
+        let mut out = Vec::new();
+
+        for it in items.iter_mut().take(n) {
+            it.counters.used_count += 1;
+            it.counters.last_used_at = Some(now.clone());
+            out.push(it.clone());
+        }
+
+        self.write_all(&items)?;
+
+        Ok(out)
     }
 }
 
@@ -359,5 +370,38 @@ mod tests {
         let out = store.recall(&ctx).unwrap();
         assert!(!out.is_empty());
         assert!(out.iter().any(|i| i.content.contains("rg")));
+    }
+
+    #[test]
+    fn recall_persists_usage_counters() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mem.jsonl");
+        let store = JsonlMemoryStore::new(&path);
+        store
+            .add(MemoryItem::new(
+                MemoryScope::Global,
+                MemoryType::Pref,
+                "remember me".to_string(),
+            ))
+            .unwrap();
+
+        let ctx = RecallContext {
+            prompt: "remember",
+            current_file: None,
+            current_crate: None,
+            lang: None,
+            want: 1,
+        };
+
+        let out1 = store.recall(&ctx).unwrap();
+        assert_eq!(out1[0].counters.used_count, 1);
+        let first_used = out1[0].counters.last_used_at.clone();
+
+        std::thread::sleep(std::time::Duration::from_secs(1));
+
+        let store = JsonlMemoryStore::new(&path);
+        let out2 = store.recall(&ctx).unwrap();
+        assert_eq!(out2[0].counters.used_count, 2);
+        assert_ne!(out2[0].counters.last_used_at, first_used);
     }
 }
