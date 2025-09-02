@@ -7,8 +7,17 @@ use tokio::sync::mpsc::unbounded_channel;
 use tracing_subscriber::EnvFilter;
 
 use chrono::Utc;
+use codex_core::codex::Codex;
+use codex_core::config::Config;
+use codex_core::config::ConfigOverrides;
+use codex_core::config::find_codex_home;
+use codex_core::protocol::EventMsg;
+use codex_core::protocol::InputItem as AgentInputItem;
+use codex_core::protocol::Op as AgentOp;
+use codex_login::AuthManager;
 use codex_memory::factory;
-use codex_memory::recall::{recall, RecallContext};
+use codex_memory::recall::RecallContext;
+use codex_memory::recall::recall;
 use codex_memory::types::Counters;
 use codex_memory::types::Kind;
 use codex_memory::types::MemoryItem;
@@ -101,63 +110,52 @@ fn main() {
         }
         return;
     }
-    let (tx, rx) = unbounded_channel::<FrontendMsg>();
-    std::thread::spawn(move || backend_thread(rx));
+    let (tx, rx_frontend) = unbounded_channel::<FrontendMsg>();
+    let (tx_backend, rx_backend) = unbounded_channel::<BackendMsg>();
+    std::thread::spawn(move || backend_thread(rx_frontend, tx_backend));
 
     // Move owned copies into the closure to satisfy 'static bounds.
     let args_owned = args.clone();
     let tx_owned = tx.clone();
+    let rx_backend_cell = std::sync::Arc::new(std::sync::Mutex::new(Some(rx_backend)));
     let run_with = move |renderer: eframe::Renderer| {
-        let native_options = eframe::NativeOptions { renderer, ..Default::default() };
+        let native_options = eframe::NativeOptions {
+            renderer,
+            ..Default::default()
+        };
         let args_for_app = args_owned.clone();
         let tx_for_app = tx_owned.clone();
         eframe::run_native(
             "Codex GUI",
             native_options,
-            Box::new(move |cc| Ok(Box::new(CodexGui::new(cc, args_for_app.clone(), tx_for_app.clone())))),
+            Box::new(move |cc| {
+                let rx_for_app = rx_backend_cell
+                    .lock()
+                    .ok()
+                    .and_then(|mut g| g.take())
+                    .expect("rx_backend reused");
+                Ok(Box::new(CodexGui::new(
+                    cc,
+                    args_for_app.clone(),
+                    tx_for_app.clone(),
+                    rx_for_app,
+                )))
+            }),
         )
     };
 
-    let res = match args.renderer {
-        RendererToggle::Wgpu => run_with(eframe::Renderer::Wgpu),
-        RendererToggle::Glow => {
-            match run_with(eframe::Renderer::Glow) {
-                Ok(()) => Ok(()),
-                Err(e) => {
-                    tracing::warn!("Glow init failed: {}", e);
-                    if is_wsl() {
-                        unsafe { std::env::set_var("WGPU_BACKEND", "gl") };
-                        tracing::info!("Retrying with WGPU (GL backend) due to Glow failure on WSL");
-                        run_with(eframe::Renderer::Wgpu)
-                    } else {
-                        Err(e)
-                    }
-                }
-            }
-        },
+    let chosen = match args.renderer {
+        RendererToggle::Wgpu => eframe::Renderer::Wgpu,
+        RendererToggle::Glow => eframe::Renderer::Glow,
         RendererToggle::Auto => {
             if is_wsl() {
-                tracing::info!("WSL detected: preferring Glow backend in Auto mode");
-                match run_with(eframe::Renderer::Glow) {
-                    Ok(()) => Ok(()),
-                    Err(e) => {
-                        tracing::warn!("Glow init failed: {}", e);
-                        unsafe { std::env::set_var("WGPU_BACKEND", "gl") };
-                        tracing::info!("Retrying with WGPU (GL backend) due to Glow failure on WSL");
-                        run_with(eframe::Renderer::Wgpu)
-                    }
-                }
+                eframe::Renderer::Glow
             } else {
-                match run_with(eframe::Renderer::Wgpu) {
-                    Ok(()) => Ok(()),
-                    Err(e) => {
-                        tracing::warn!("WGPU backend failed: {} — retrying with Glow", e);
-                        run_with(eframe::Renderer::Glow)
-                    }
-                }
+                eframe::Renderer::Wgpu
             }
         }
     };
+    let res = run_with(chosen);
     if let Err(e) = res {
         eprintln!("Failed to start Codex GUI: {e}");
     }
@@ -245,24 +243,112 @@ fn run_headless(args: &Args) -> anyhow::Result<()> {
 }
 
 // Placeholder backend thread – will integrate codex-core events later.
-fn backend_thread(_rx: UnboundedReceiver<FrontendMsg>) {
-    // For MVP skeleton we do nothing here.
+fn backend_thread(
+    rx_frontend: UnboundedReceiver<FrontendMsg>,
+    tx_backend: UnboundedSender<BackendMsg>,
+) {
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(rt) => rt,
+        Err(e) => {
+            let _ = tx_backend.send(BackendMsg::Error(format!("tokio runtime init failed: {e}")));
+            return;
+        }
+    };
+    rt.block_on(async move {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let overrides = ConfigOverrides {
+            cwd: Some(cwd.clone()),
+            ..Default::default()
+        };
+        let config = match Config::load_with_cli_overrides(vec![], overrides) {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = tx_backend.send(BackendMsg::Error(format!("config load failed: {e}")));
+                return;
+            }
+        };
+        let codex_home = match find_codex_home() {
+            Ok(p) => p,
+            Err(e) => {
+                let _ = tx_backend.send(BackendMsg::Error(format!("find_codex_home failed: {e}")));
+                return;
+            }
+        };
+        let auth_manager = AuthManager::shared(codex_home, config.preferred_auth_method);
+        if auth_manager.auth().is_none() {
+            let _ = tx_backend.send(BackendMsg::AuthMissing);
+        }
+        if auth_manager.auth().is_none() {
+            let _ = tx_backend.send(BackendMsg::AuthMissing);
+        }
+        let spawn_ok = match Codex::spawn(config.clone(), auth_manager, None).await {
+            Ok(ok) => ok,
+            Err(e) => {
+                let _ = tx_backend.send(BackendMsg::Error(format!("codex spawn failed: {e}")));
+                return;
+            }
+        };
+        let mut rx = rx_frontend;
+        loop {
+            tokio::select! {
+                evt = spawn_ok.codex.next_event() => {
+                    match evt {
+                        Ok(ev) => match ev.msg {
+                            EventMsg::AgentMessage(m) => { let _ = tx_backend.send(BackendMsg::AgentText(m.message)); }
+                            EventMsg::AgentMessageDelta(d) => { let _ = tx_backend.send(BackendMsg::AgentDelta(d.delta)); }
+                            EventMsg::AgentReasoning(r) => { let _ = tx_backend.send(BackendMsg::Reasoning(r.text)); }
+                            EventMsg::Error(err) => { let _ = tx_backend.send(BackendMsg::Error(err.message)); }
+                            EventMsg::TaskComplete(_) => { let _ = tx_backend.send(BackendMsg::TaskComplete); }
+                            _ => {}
+                        },
+                        Err(e) => { let _ = tx_backend.send(BackendMsg::Error(format!("event error: {e}"))); break; }
+                    }
+                }
+                msg = rx.recv() => {
+                    match msg {
+                        Some(FrontendMsg::SendPrompt(text)) => {
+                            if !text.trim().is_empty() {
+                                let _ = spawn_ok.codex.submit(AgentOp::UserInput { items: vec![AgentInputItem::Text { text }] }).await;
+                            }
+                        }
+                        None => break,
+                    }
+                }
+            }
+        }
+
+    });
 }
 
 #[derive(Clone, Debug)]
 enum FrontendMsg {
-    SendPrompt(()),
+    SendPrompt(String),
+}
+
+#[derive(Clone, Debug)]
+enum BackendMsg {
+    AgentText(String),
+    AgentDelta(String),
+    Reasoning(String),
+    Error(String),
+    TaskComplete,
+    AuthMissing,
 }
 
 struct CodexGui {
     args: Args,
     to_backend: UnboundedSender<FrontendMsg>,
+    rx_backend: UnboundedReceiver<BackendMsg>,
     // UI state
     prompt: String,
     transcript: Vec<String>,
     memory_items: Vec<String>,
     repo_root: PathBuf,
     recall_items: Vec<String>,
+    reasoning_lines: Vec<String>,
+    response_open: bool,
+    response_text: String,
+    auth_missing: bool,
 }
 
 impl CodexGui {
@@ -270,6 +356,7 @@ impl CodexGui {
         _cc: &eframe::CreationContext<'_>,
         args: Args,
         to_backend: UnboundedSender<FrontendMsg>,
+        rx_backend: UnboundedReceiver<BackendMsg>,
     ) -> Self {
         let repo_root = args
             .cwd
@@ -279,11 +366,16 @@ impl CodexGui {
         let mut this = Self {
             args,
             to_backend,
+            rx_backend,
             prompt: String::new(),
             transcript: Vec::new(),
             memory_items: Vec::new(),
             repo_root,
             recall_items: Vec::new(),
+            reasoning_lines: Vec::new(),
+            response_open: false,
+            response_text: String::new(),
+            auth_missing: false,
         };
         this.refresh_memory_safely();
         this
@@ -375,6 +467,45 @@ impl CodexGui {
 
 impl eframe::App for CodexGui {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        while let Ok(msg) = self.rx_backend.try_recv() {
+            match msg {
+                BackendMsg::AgentText(text) => {
+                    if !text.is_empty() {
+                        self.response_text = text.clone();
+                        self.response_open = true;
+                        self.transcript.push(format!("Codex: {text}"));
+                    }
+                }
+                BackendMsg::AgentDelta(delta) => {
+                    if !delta.is_empty() {
+                        if self.response_text.is_empty() {
+                            self.response_open = true;
+                        }
+                        self.response_text.push_str(&delta);
+                    }
+                }
+                BackendMsg::Reasoning(r) => {
+                    self.reasoning_lines.push(r);
+                }
+                BackendMsg::Error(e) => {
+                    self.response_text = format!("Error: {e}");
+                    self.response_open = true;
+                }
+                BackendMsg::TaskComplete => {}
+                BackendMsg::AuthMissing => {
+                    self.auth_missing = true;
+                }
+            }
+        }
+        if self.auth_missing {
+            egui::TopBottomPanel::top("auth_banner").show(ctx, |ui| {
+                ui.vertical(|ui| {
+                    ui.colored_label(egui::Color32::from_rgb(200, 60, 60), "Not authenticated: set OPENAI_API_KEY or run `codex login`.");
+                    ui.small("Tip: set an API key with `export OPENAI_API_KEY=sk-...` before launching the GUI.");
+                });
+            });
+        }
+
         egui::TopBottomPanel::top("top_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Codex GUI — MVP");
@@ -404,21 +535,55 @@ impl eframe::App for CodexGui {
                 && ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.shift_only())
             {
                 self.to_backend
-                    .send(FrontendMsg::SendPrompt(()))
+                    .send(FrontendMsg::SendPrompt(self.prompt.clone()))
                     .ok();
                 self.transcript.push(format!("You: {}", self.prompt));
                 let q = self.prompt.clone();
                 self.perform_recall_safely(&q);
+                self.response_text = if self.recall_items.is_empty() {
+                    "(demo) No model wired yet; recall is shown at right.".into()
+                } else {
+                    let mut t = String::from(
+                        "(demo) Relevant memory:
+",
+                    );
+                    for it in &self.recall_items {
+                        t.push_str(it);
+                        t.push_str(
+                            "
+",
+                        );
+                    }
+                    t
+                };
+                self.response_open = true;
                 self.prompt.clear();
             }
             ui.horizontal(|ui| {
                 if ui.button("Send (Shift+Enter)").clicked() {
                     self.to_backend
-                        .send(FrontendMsg::SendPrompt(()))
+                        .send(FrontendMsg::SendPrompt(self.prompt.clone()))
                         .ok();
                     self.transcript.push(format!("You: {}", self.prompt));
                     let q = self.prompt.clone();
                     self.perform_recall_safely(&q);
+                    self.response_text = if self.recall_items.is_empty() {
+                        "(demo) No model wired yet; recall is shown at right.".into()
+                    } else {
+                        let mut t = String::from(
+                            "(demo) Relevant memory:
+",
+                        );
+                        for it in &self.recall_items {
+                            t.push_str(it);
+                            t.push_str(
+                                "
+",
+                            );
+                        }
+                        t
+                    };
+                    self.response_open = true;
                     self.prompt.clear();
                 }
                 if ui.button("Save to Memory").clicked() {
@@ -437,6 +602,21 @@ impl eframe::App for CodexGui {
             });
         });
 
+        egui::SidePanel::left("reasoning_panel")
+            .resizable(true)
+            .default_width(280.0)
+            .show(ctx, |ui| {
+                ui.heading("Reasoning");
+                egui::ScrollArea::vertical()
+                    .id_source("reasoning_scroll")
+                    .show(ui, |ui| {
+                        for line in &self.reasoning_lines {
+                            ui.label(line);
+                            ui.separator();
+                        }
+                    });
+            });
+
         egui::SidePanel::right("memory_panel")
             .resizable(true)
             .default_width(320.0)
@@ -453,24 +633,40 @@ impl eframe::App for CodexGui {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.columns(2, |cols| {
                 cols[0].heading("Transcript");
-                egui::ScrollArea::vertical().show(&mut cols[0], |ui| {
-                    for line in &self.transcript {
-                        ui.label(line);
-                        ui.separator();
-                    }
-                });
+                egui::ScrollArea::vertical()
+                    .id_source("transcript_scroll")
+                    .show(&mut cols[0], |ui| {
+                        for line in &self.transcript {
+                            ui.label(line);
+                            ui.separator();
+                        }
+                    });
 
                 cols[1].heading("Relevant Memory (Recall)");
-                egui::ScrollArea::vertical().show(&mut cols[1], |ui| {
-                    if self.recall_items.is_empty() {
-                        ui.label("No relevant items yet.");
-                    }
-                    for item in &self.recall_items {
-                        ui.label(item);
-                        ui.separator();
-                    }
-                });
+                egui::ScrollArea::vertical()
+                    .id_source("recall_scroll")
+                    .show(&mut cols[1], |ui| {
+                        if self.recall_items.is_empty() {
+                            ui.label("No relevant items yet.");
+                        }
+                        for item in &self.recall_items {
+                            ui.label(item);
+                            ui.separator();
+                        }
+                    });
             });
         });
+
+        egui::Window::new("Response from Codex")
+            .id(egui::Id::new("response_window"))
+            .open(&mut self.response_open)
+            .resizable(true)
+            .show(ctx, |ui| {
+                if self.response_text.is_empty() {
+                    ui.label("No response yet.");
+                } else {
+                    ui.label(&self.response_text);
+                }
+            });
     }
 }

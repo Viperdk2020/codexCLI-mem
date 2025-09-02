@@ -1,4 +1,3 @@
-
 use codex_memory::factory::Backend;
 use codex_memory::redact::redact_candidate;
 
@@ -14,13 +13,12 @@ fn backends() -> Vec<Backend> {
 }
 
 #[test]
-fn redact_unimplemented_panics() {
+fn redact_no_panic() {
     for _be in backends() {
         let res = std::panic::catch_unwind(|| redact_candidate("secret"));
-        assert!(res.is_err());
+        assert!(res.is_ok());
     }
-  
-use codex_memory::redact::redact_candidate;
+}
 
 #[test]
 fn api_key_detection() {
@@ -56,5 +54,4 @@ fn no_detection() {
     assert!(!result.blocked);
     assert!(result.issues.is_empty());
     assert_eq!(result.masked, input);
-
 }

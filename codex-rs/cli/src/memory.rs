@@ -37,7 +37,23 @@ pub enum MemoryCommand {
     /// Import memory items from stdin.
     Import,
     /// Migrate a JSONL file to a SQLite database.
-    Migrate { jsonl: PathBuf, sqlite: PathBuf },
+    Migrate {
+        /// Path to the source JSONL file
+        #[arg(long)]
+        jsonl: PathBuf,
+        /// Path to the destination SQLite database file
+        #[arg(long)]
+        sqlite: PathBuf,
+    },
+    /// Compact a JSONL file by removing duplicate entries.
+    Compact {
+        /// Input JSONL file to compact
+        #[arg(long)]
+        input: PathBuf,
+        /// Output JSONL file to write results
+        #[arg(long)]
+        output: PathBuf,
+    },
     /// Show basic statistics about stored memories.
     Stats,
     /// Recall memories for a given prompt.
@@ -51,7 +67,8 @@ pub enum MemoryCommand {
 pub fn run(cli: MemoryCli) -> anyhow::Result<()> {
     match cli.cmd {
         MemoryCommand::Migrate { jsonl, sqlite } => {
-            codex_memory::migrate::migrate_jsonl_to_sqlite(&jsonl, &sqlite)?;
+            let n = codex_memory::migrate::migrate_jsonl_to_sqlite(&jsonl, &sqlite)?;
+            println!("Migrated {n} entries");
         }
         cmd => {
             let repo_root = std::env::current_dir()?;
@@ -135,6 +152,10 @@ pub fn run(cli: MemoryCli) -> anyhow::Result<()> {
                     };
                     let items = codex_memory::recall::recall(store.as_ref(), &query, &ctx)?;
                     println!("{}", serde_json::to_string(&items)?);
+                }
+                MemoryCommand::Compact { input, output } => {
+                    let (read, written) = codex_memory::migrate::compact_jsonl(&input, &output)?;
+                    println!("Read {read} entries, wrote {written} entries");
                 }
                 MemoryCommand::Migrate { .. } => unreachable!(),
             }

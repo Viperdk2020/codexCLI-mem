@@ -45,6 +45,9 @@ pub fn open_repo_store(
             let path = std::env::var("CODEX_MEMORY_REPO_DB")
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|_| base.join("memory.db"));
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
             Box::new(SqliteMemoryStore::new(path))
         }
     })
@@ -72,6 +75,9 @@ pub fn open_global_store(
             let path = std::env::var("CODEX_MEMORY_HOME_DB")
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|_| base.join("memory.db"));
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
             Box::new(SqliteMemoryStore::new(path))
         }
     })

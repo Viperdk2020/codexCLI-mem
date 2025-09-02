@@ -1335,6 +1335,7 @@ dependencies = [
  "clap",
  "codex-common",
  "codex-core",
+ "codex-login",
  "codex-memory",
  "eframe",
  "egui",

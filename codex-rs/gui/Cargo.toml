@@ -25,3 +25,6 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 codex-core = { package = "codex-core", path = "../core" }
 codex-common = { package = "codex-common", path = "../common" }
 codex-memory = { package = "codex-memory", path = "../memory" }
+
+# Added by GUI integration
+codex-login = { package = "codex-login", path = "../login" }
