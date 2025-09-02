@@ -350,6 +350,7 @@ struct CodexGui {
     response_text: String,
     auth_missing: bool,
     dark_mode: bool,
+    memory_open: bool,
 }
 
 impl CodexGui {
@@ -381,6 +382,7 @@ impl CodexGui {
             response_text: String::new(),
             auth_missing: false,
             dark_mode: true,
+            memory_open: true,
         };
         this.refresh_memory_safely();
         this
@@ -543,6 +545,15 @@ impl eframe::App for CodexGui {
                 if ui.button(theme_label).clicked() {
                     self.toggle_theme(ctx);
                 }
+                ui.separator();
+                let mem_label = if self.memory_open {
+                    "Hide Memory"
+                } else {
+                    "Show Memory"
+                };
+                if ui.button(mem_label).clicked() {
+                    self.memory_open = !self.memory_open;
+                }
             });
         });
 
@@ -554,12 +565,12 @@ impl eframe::App for CodexGui {
                 .hint_text("Type a prompt…")
                 .lock_focus(true)
                 .show(ui);
-            if r.response.lost_focus()
+            // Send when the editor has focus and Enter is pressed with Shift or Command/Ctrl.
+            let send_shortcut = r.response.has_focus()
                 && ui.input(|i| {
-                    i.key_pressed(egui::Key::Enter)
-                        && (i.modifiers.shift_only() || i.modifiers.command_only())
-                })
-            {
+                    i.key_pressed(egui::Key::Enter) && (i.modifiers.shift || i.modifiers.command)
+                });
+            if send_shortcut {
                 self.to_backend
                     .send(FrontendMsg::SendPrompt(self.prompt.clone()))
                     .ok();
@@ -646,9 +657,9 @@ impl eframe::App for CodexGui {
             });
         });
 
-        egui::SidePanel::left("reasoning_panel")
+        egui::SidePanel::right("reasoning_panel")
             .resizable(true)
-            .default_width(280.0)
+            .default_width(320.0)
             .show(ctx, |ui| {
                 ui.heading("Reasoning");
                 egui::ScrollArea::vertical()
@@ -661,44 +672,71 @@ impl eframe::App for CodexGui {
                     });
             });
 
-        egui::SidePanel::right("memory_panel")
+        egui::Window::new("Memory")
+            .id(egui::Id::new("memory_window"))
+            .open(&mut self.memory_open)
             .resizable(true)
-            .default_width(320.0)
+            .default_size(egui::vec2(420.0, 360.0))
             .show(ctx, |ui| {
-                ui.heading("Project Memory");
-                if self.memory_items.is_empty() {
-                    ui.label("No durable items yet.");
-                }
-                for item in &self.memory_items {
-                    ui.label(item);
-                }
+                ui.vertical(|ui| {
+                    egui::collapsing_header::CollapsingState::load_with_default_open(
+                        ctx,
+                        egui::Id::new("mem_project_header"),
+                        true,
+                    )
+                    .show_header(ui, |ui| {
+                        ui.heading("Project Memory");
+                    })
+                    .body(|ui| {
+                        egui::ScrollArea::vertical()
+                            .id_source("mem_project_list")
+                            .show(ui, |ui| {
+                                if self.memory_items.is_empty() {
+                                    ui.label("No durable items yet.");
+                                }
+                                for item in &self.memory_items {
+                                    ui.label(item);
+                                    ui.separator();
+                                }
+                            });
+                    });
+
+                    ui.separator();
+
+                    egui::collapsing_header::CollapsingState::load_with_default_open(
+                        ctx,
+                        egui::Id::new("mem_recall_header"),
+                        true,
+                    )
+                    .show_header(ui, |ui| {
+                        ui.heading("Relevant Memory (Recall)");
+                    })
+                    .body(|ui| {
+                        egui::ScrollArea::vertical()
+                            .id_source("mem_recall_list")
+                            .show(ui, |ui| {
+                                if self.recall_items.is_empty() {
+                                    ui.label("No relevant items yet.");
+                                }
+                                for item in &self.recall_items {
+                                    ui.label(item);
+                                    ui.separator();
+                                }
+                            });
+                    });
+                });
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.columns(2, |cols| {
-                cols[0].heading("Transcript");
-                egui::ScrollArea::vertical()
-                    .id_source("transcript_scroll")
-                    .show(&mut cols[0], |ui| {
-                        for line in &self.transcript {
-                            ui.label(line);
-                            ui.separator();
-                        }
-                    });
-
-                cols[1].heading("Relevant Memory (Recall)");
-                egui::ScrollArea::vertical()
-                    .id_source("recall_scroll")
-                    .show(&mut cols[1], |ui| {
-                        if self.recall_items.is_empty() {
-                            ui.label("No relevant items yet.");
-                        }
-                        for item in &self.recall_items {
-                            ui.label(item);
-                            ui.separator();
-                        }
-                    });
-            });
+            ui.heading("Transcript");
+            egui::ScrollArea::vertical()
+                .id_source("transcript_scroll")
+                .show(ui, |ui| {
+                    for line in &self.transcript {
+                        ui.label(line);
+                        ui.separator();
+                    }
+                });
         });
 
         egui::Window::new("Response from Codex")
