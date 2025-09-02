@@ -1,7 +1,12 @@
-use codex_memory::recall::recall;
 use codex_memory::recall::RecallContext;
+use codex_memory::recall::recall;
 use codex_memory::store::MemoryStore;
-use codex_memory::types::{Counters, Kind, MemoryItem, RelevanceHints, Scope, Status};
+use codex_memory::types::Counters;
+use codex_memory::types::Kind;
+use codex_memory::types::MemoryItem;
+use codex_memory::types::RelevanceHints;
+use codex_memory::types::Scope;
+use codex_memory::types::Status;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -13,7 +18,9 @@ struct TestStore {
 impl TestStore {
     fn new(items: Vec<MemoryItem>) -> Self {
         let map = items.into_iter().map(|i| (i.id.clone(), i)).collect();
-        Self { items: Mutex::new(map) }
+        Self {
+            items: Mutex::new(map),
+        }
     }
 }
 
@@ -24,29 +31,49 @@ impl MemoryStore for TestStore {
     }
 
     fn update(&self, item: &MemoryItem) -> anyhow::Result<()> {
-        self.items.lock().unwrap().insert(item.id.clone(), item.clone());
+        self.items
+            .lock()
+            .unwrap()
+            .insert(item.id.clone(), item.clone());
         Ok(())
     }
 
-    fn delete(&self, _id: &str) -> anyhow::Result<()> { Ok(()) }
+    fn delete(&self, _id: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
 
     fn get(&self, id: &str) -> anyhow::Result<Option<MemoryItem>> {
         Ok(self.items.lock().unwrap().get(id).cloned())
     }
 
-    fn list(&self, _scope: Option<Scope>, status: Option<Status>) -> anyhow::Result<Vec<MemoryItem>> {
+    fn list(
+        &self,
+        _scope: Option<Scope>,
+        status: Option<Status>,
+    ) -> anyhow::Result<Vec<MemoryItem>> {
         let items = self.items.lock().unwrap();
         Ok(items
             .values()
-            .filter(|i| match status.as_ref() { Some(s) => i.status == *s, None => true })
+            .filter(|i| match status.as_ref() {
+                Some(s) => i.status == *s,
+                None => true,
+            })
             .cloned()
             .collect())
     }
 
-    fn archive(&self, _id: &str, _archived: bool) -> anyhow::Result<()> { Ok(()) }
-    fn export(&self, _out: &mut dyn std::io::Write) -> anyhow::Result<()> { Ok(()) }
-    fn import(&self, _input: &mut dyn std::io::Read) -> anyhow::Result<usize> { Ok(0) }
-    fn stats(&self) -> anyhow::Result<serde_json::Value> { Ok(serde_json::json!({})) }
+    fn archive(&self, _id: &str, _archived: bool) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn export(&self, _out: &mut dyn std::io::Write) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn import(&self, _input: &mut dyn std::io::Read) -> anyhow::Result<usize> {
+        Ok(0)
+    }
+    fn stats(&self) -> anyhow::Result<serde_json::Value> {
+        Ok(serde_json::json!({}))
+    }
 }
 
 fn item(id: &str, content: &str, lang: &str) -> MemoryItem {
@@ -61,8 +88,17 @@ fn item(id: &str, content: &str, lang: &str) -> MemoryItem {
         kind: Kind::Fact,
         content: content.into(),
         tags: vec![],
-        relevance_hints: RelevanceHints { files: vec![], crates: vec![], languages: vec![lang.into()], commands: vec![] },
-        counters: Counters { seen_count: 0, used_count: 0, last_used_at: None },
+        relevance_hints: RelevanceHints {
+            files: vec![],
+            crates: vec![],
+            languages: vec![lang.into()],
+            commands: vec![],
+        },
+        counters: Counters {
+            seen_count: 0,
+            used_count: 0,
+            last_used_at: None,
+        },
         expiry: None,
     }
 }
@@ -99,4 +135,3 @@ fn ranks_and_updates_counters() {
     assert_eq!(c_upd.counters.used_count, 0);
     assert_eq!(c_upd.counters.last_used_at, None);
 }
-

@@ -10,7 +10,9 @@ pub struct JsonlMemoryStore {
 
 impl JsonlMemoryStore {
     pub fn new<P: AsRef<Path>>(path: P) -> Self {
-        Self { path: path.as_ref().to_path_buf() }
+        Self {
+            path: path.as_ref().to_path_buf(),
+        }
     }
 
     fn read_all(&self) -> anyhow::Result<Vec<MemoryItem>> {
@@ -131,7 +133,9 @@ impl MemoryStore for JsonlMemoryStore {
         let mut count = 0usize;
         for line in data.lines() {
             let line = line.trim();
-            if line.is_empty() { continue; }
+            if line.is_empty() {
+                continue;
+            }
             if let Ok(item) = serde_json::from_str::<MemoryItem>(line) {
                 map.insert(item.id.clone(), item);
                 count += 1;
@@ -154,7 +158,11 @@ impl MemoryStore for JsonlMemoryStore {
         let mut by_scope = serde_json::Map::new();
         for sc in [Scope::Global, Scope::Repo, Scope::Dir] {
             let n = items.iter().filter(|i| i.scope == sc).count();
-            let key = match sc { Scope::Global => "global", Scope::Repo => "repo", Scope::Dir => "dir" };
+            let key = match sc {
+                Scope::Global => "global",
+                Scope::Repo => "repo",
+                Scope::Dir => "dir",
+            };
             by_scope.insert(key.to_string(), serde_json::json!(n));
         }
         Ok(serde_json::json!({

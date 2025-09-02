@@ -606,8 +606,17 @@ mod tests {
             kind: Kind::Pref,
             content: "prefer ruff".into(),
             tags: vec!["python".into(), "style".into()],
-            relevance_hints: RelevanceHints { files: vec![], crates: vec![], languages: vec![], commands: vec![] },
-            counters: Counters { seen_count: 0, used_count: 0, last_used_at: None },
+            relevance_hints: RelevanceHints {
+                files: vec![],
+                crates: vec![],
+                languages: vec![],
+                commands: vec![],
+            },
+            counters: Counters {
+                seen_count: 0,
+                used_count: 0,
+                last_used_at: None,
+            },
             expiry: None,
         };
         store.add(item).unwrap();

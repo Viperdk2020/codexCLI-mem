@@ -74,11 +74,12 @@ pub fn compact_jsonl(
         }
         read += 1;
         if let Ok(item) = serde_json::from_str::<MemoryItem>(trimmed)
-            && seen.insert(item.id) {
-                writer.write_all(trimmed.as_bytes())?;
-                writer.write_all(b"\n")?;
-                written += 1;
-            }
+            && seen.insert(item.id)
+        {
+            writer.write_all(trimmed.as_bytes())?;
+            writer.write_all(b"\n")?;
+            written += 1;
+        }
     }
     writer.flush()?;
     if output_path == input_path {

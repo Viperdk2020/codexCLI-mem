@@ -64,4 +64,3 @@ fn memory_migrate_imports_entries() -> Result<(), Box<dyn std::error::Error>> {
     assert!(sqlite.exists());
     Ok(())
 }
-

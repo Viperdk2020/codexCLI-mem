@@ -3,7 +3,8 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::Paragraph;
-use ratatui::widgets::{Widget, WidgetRef};
+use ratatui::widgets::Widget;
+use ratatui::widgets::WidgetRef;
 use uuid::Uuid;
 
 use codex_memory::factory;

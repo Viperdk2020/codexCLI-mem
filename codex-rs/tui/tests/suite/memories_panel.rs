@@ -1,8 +1,8 @@
 use codex_tui::memories_panel::MemoriesPanel;
 use codex_tui::memory::MemoryLogger;
+use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::widgets::WidgetRef;
-use ratatui::Terminal;
 use tempfile::tempdir;
 
 #[test]
@@ -39,8 +39,17 @@ fn preamble_preview() {
         kind: codex_memory::types::Kind::Pref,
         content: "Respect editorconfig".into(),
         tags: vec![],
-        relevance_hints: codex_memory::types::RelevanceHints { files: vec![], crates: vec![], languages: vec![], commands: vec![] },
-        counters: codex_memory::types::Counters { seen_count: 0, used_count: 0, last_used_at: None },
+        relevance_hints: codex_memory::types::RelevanceHints {
+            files: vec![],
+            crates: vec![],
+            languages: vec![],
+            commands: vec![],
+        },
+        counters: codex_memory::types::Counters {
+            seen_count: 0,
+            used_count: 0,
+            last_used_at: None,
+        },
         expiry: None,
     };
     store.add(pref).unwrap();

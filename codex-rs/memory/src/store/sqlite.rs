@@ -160,9 +160,8 @@ fn row_to_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryItem> {
     let expiry_s: Option<String> = row.get(12)?;
 
     let parse_json = |idx: usize, s: &str| -> rusqlite::Result<serde_json::Value> {
-        serde_json::from_str(s).map_err(|e| {
-            rusqlite::Error::FromSqlConversionFailure(idx, Type::Text, Box::new(e))
-        })
+        serde_json::from_str(s)
+            .map_err(|e| rusqlite::Error::FromSqlConversionFailure(idx, Type::Text, Box::new(e)))
     };
 
     Ok(MemoryItem {
@@ -175,8 +174,7 @@ fn row_to_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryItem> {
             .map_err(|_| conv_err(5, format!("invalid scope: {}", scope_s)))?,
         status: parse_status(&status_s)
             .map_err(|_| conv_err(6, format!("invalid status: {}", status_s)))?,
-        kind: parse_kind(&kind_s)
-            .map_err(|_| conv_err(7, format!("invalid kind: {}", kind_s)))?,
+        kind: parse_kind(&kind_s).map_err(|_| conv_err(7, format!("invalid kind: {}", kind_s)))?,
         content: row.get::<_, String>(8)?,
         tags: serde_json::from_value(parse_json(9, &tags_s)?)
             .map_err(|e| conv_err(9, format!("tags decode: {e}")))?,
@@ -291,10 +289,11 @@ impl MemoryStore for SqliteMemoryStore {
                 vec![status_as_str(&st).to_string()],
             ),
             (Some(sc), Some(st)) => (
-                format!(
-                    "{base} WHERE scope = ?1 AND status = ?2 ORDER BY updated_at DESC"
-                ),
-                vec![scope_as_str(&sc).to_string(), status_as_str(&st).to_string()],
+                format!("{base} WHERE scope = ?1 AND status = ?2 ORDER BY updated_at DESC"),
+                vec![
+                    scope_as_str(&sc).to_string(),
+                    status_as_str(&st).to_string(),
+                ],
             ),
         };
 

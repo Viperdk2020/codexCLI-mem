@@ -29,21 +29,36 @@ pub fn redact_candidate(s: &str) -> Redaction {
         Regex::new(r"(?i)(api[_-]?key|token|secret|password)[\s:=]+([A-Za-z0-9_\-]{16,})").unwrap();
     for caps in api_re.captures_iter(s) {
         if let Some(mat) = caps.get(2) {
-            push_span(&mut spans, &mut issues, (mat.start(), mat.end()), "possible API key");
+            push_span(
+                &mut spans,
+                &mut issues,
+                (mat.start(), mat.end()),
+                "possible API key",
+            );
         }
     }
 
     // SSH public keys or PEM encoded private keys.
     let ssh_re = Regex::new(r"ssh-(rsa|ed25519) [A-Za-z0-9+/=]{20,}").unwrap();
     for mat in ssh_re.find_iter(s) {
-        push_span(&mut spans, &mut issues, (mat.start(), mat.end()), "possible SSH key");
+        push_span(
+            &mut spans,
+            &mut issues,
+            (mat.start(), mat.end()),
+            "possible SSH key",
+        );
     }
 
     let pem_re =
         Regex::new(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----")
             .unwrap();
     for mat in pem_re.find_iter(s) {
-        push_span(&mut spans, &mut issues, (mat.start(), mat.end()), "possible private key");
+        push_span(
+            &mut spans,
+            &mut issues,
+            (mat.start(), mat.end()),
+            "possible private key",
+        );
     }
 
     // High entropy strings: long base64/hex-like tokens.
@@ -57,14 +72,21 @@ pub fn redact_candidate(s: &str) -> Redaction {
             continue;
         }
         if shannon_entropy(token) >= 4.5 {
-            push_span(&mut spans, &mut issues, (mat.start(), mat.end()), "high-entropy string");
+            push_span(
+                &mut spans,
+                &mut issues,
+                (mat.start(), mat.end()),
+                "high-entropy string",
+            );
         }
     }
 
     spans.sort_by_key(|r| r.0);
     let mut merged: Vec<(usize, usize)> = Vec::new();
     for (start, end) in spans.into_iter() {
-        if let Some(last) = merged.last_mut() && start <= last.1 {
+        if let Some(last) = merged.last_mut()
+            && start <= last.1
+        {
             last.1 = last.1.max(end);
             continue;
         }
