@@ -349,11 +349,12 @@ struct CodexGui {
     response_open: bool,
     response_text: String,
     auth_missing: bool,
+    dark_mode: bool,
 }
 
 impl CodexGui {
     fn new(
-        _cc: &eframe::CreationContext<'_>,
+        cc: &eframe::CreationContext<'_>,
         args: Args,
         to_backend: UnboundedSender<FrontendMsg>,
         rx_backend: UnboundedReceiver<BackendMsg>,
@@ -362,6 +363,9 @@ impl CodexGui {
             .cwd
             .clone()
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+        // Default to dark visuals; user can toggle at runtime.
+        cc.egui_ctx.set_visuals(egui::Visuals::dark());
 
         let mut this = Self {
             args,
@@ -376,9 +380,19 @@ impl CodexGui {
             response_open: false,
             response_text: String::new(),
             auth_missing: false,
+            dark_mode: true,
         };
         this.refresh_memory_safely();
         this
+    }
+
+    fn toggle_theme(&mut self, ctx: &egui::Context) {
+        self.dark_mode = !self.dark_mode;
+        if self.dark_mode {
+            ctx.set_visuals(egui::Visuals::dark());
+        } else {
+            ctx.set_visuals(egui::Visuals::light());
+        }
     }
 
     fn refresh_memory_safely(&mut self) {
@@ -497,6 +511,10 @@ impl eframe::App for CodexGui {
                 }
             }
         }
+        // Theme toggle: Cmd/Ctrl+T
+        if ctx.input(|i| i.key_pressed(egui::Key::T) && i.modifiers.command_only()) {
+            self.toggle_theme(ctx);
+        }
         if self.auth_missing {
             egui::TopBottomPanel::top("auth_banner").show(ctx, |ui| {
                 ui.vertical(|ui| {
@@ -520,6 +538,11 @@ impl eframe::App for CodexGui {
                 ));
                 ui.separator();
                 ui.label(format!("memory: {:?}", self.args.memory));
+                ui.separator();
+                let theme_label = if self.dark_mode { "Light" } else { "Dark" };
+                if ui.button(theme_label).clicked() {
+                    self.toggle_theme(ctx);
+                }
             });
         });
 
@@ -532,7 +555,10 @@ impl eframe::App for CodexGui {
                 .lock_focus(true)
                 .show(ui);
             if r.response.lost_focus()
-                && ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.shift_only())
+                && ui.input(|i| {
+                    i.key_pressed(egui::Key::Enter)
+                        && (i.modifiers.shift_only() || i.modifiers.command_only())
+                })
             {
                 self.to_backend
                     .send(FrontendMsg::SendPrompt(self.prompt.clone()))
@@ -559,8 +585,26 @@ impl eframe::App for CodexGui {
                 self.response_open = true;
                 self.prompt.clear();
             }
+            // Keyboard shortcuts for composer actions
+            let save_shortcut =
+                ui.input(|i| i.key_pressed(egui::Key::S) && i.modifiers.command_only());
+            let recall_shortcut =
+                ui.input(|i| i.key_pressed(egui::Key::R) && i.modifiers.command_only());
+            let clear_shortcut =
+                ui.input(|i| i.key_pressed(egui::Key::L) && i.modifiers.command_only());
+            if save_shortcut {
+                self.add_prompt_to_memory_safely();
+            }
+            if recall_shortcut {
+                let q = self.prompt.clone();
+                self.perform_recall_safely(&q);
+            }
+            if clear_shortcut {
+                self.prompt.clear();
+            }
+
             ui.horizontal(|ui| {
-                if ui.button("Send (Shift+Enter)").clicked() {
+                if ui.button("Send (Shift/Ctrl+Enter)").clicked() {
                     self.to_backend
                         .send(FrontendMsg::SendPrompt(self.prompt.clone()))
                         .ok();
@@ -586,17 +630,17 @@ impl eframe::App for CodexGui {
                     self.response_open = true;
                     self.prompt.clear();
                 }
-                if ui.button("Save to Memory").clicked() {
+                if ui.button("Save (Ctrl+S)").clicked() {
                     self.add_prompt_to_memory_safely();
                 }
-                if ui.button("Recall").clicked() {
+                if ui.button("Recall (Ctrl+R)").clicked() {
                     let q = self.prompt.clone();
                     self.perform_recall_safely(&q);
                 }
                 if ui.button("Refresh Memory").clicked() {
                     self.refresh_memory_safely();
                 }
-                if ui.button("Clear").clicked() {
+                if ui.button("Clear (Ctrl+L)").clicked() {
                     self.prompt.clear();
                 }
             });
