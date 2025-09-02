@@ -147,8 +147,8 @@ pub fn run(cli: MemoryCli) -> anyhow::Result<()> {
                         language: None,
                         command: None,
                         now_rfc3339: Utc::now().to_rfc3339(),
-                        item_cap: 0,
-                        token_cap: 0,
+                        item_cap: 8,
+                        token_cap: 300,
                     };
                     let items = codex_memory::recall::recall(store.as_ref(), &query, &ctx)?;
                     println!("{}", serde_json::to_string(&items)?);

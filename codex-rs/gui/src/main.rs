@@ -223,8 +223,8 @@ fn run_headless(args: &Args) -> anyhow::Result<()> {
             language: None,
             command: None,
             now_rfc3339: Utc::now().to_rfc3339(),
-            item_cap: 0,
-            token_cap: 0,
+            item_cap: 8,
+            token_cap: 300,
         };
         let items = recall(store.as_ref(), prompt, &ctx)?;
         let texts: Vec<String> = items.into_iter().map(|i| i.content).collect();
@@ -464,8 +464,8 @@ impl CodexGui {
                     language: None,
                     command: None,
                     now_rfc3339: Utc::now().to_rfc3339(),
-                    item_cap: 0,
-                    token_cap: 0,
+                    item_cap: 8,
+                    token_cap: 300,
                 };
                 match recall(store.as_ref(), query, &ctx) {
                     Ok(items) => {
